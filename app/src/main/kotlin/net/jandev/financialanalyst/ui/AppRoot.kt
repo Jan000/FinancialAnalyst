@@ -34,6 +34,9 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import net.jandev.financialanalyst.ui.common.LocalApp
 import net.jandev.financialanalyst.ui.importing.ImportScreen
+import net.jandev.financialanalyst.ui.loans.LoanDetailScreen
+import net.jandev.financialanalyst.ui.loans.LoansScreen
+import net.jandev.financialanalyst.ui.loans.OverdraftScreen
 import net.jandev.financialanalyst.ui.more.MoreEntry
 import net.jandev.financialanalyst.ui.more.MoreScreen
 import net.jandev.financialanalyst.ui.overview.OverviewScreen
@@ -56,6 +59,9 @@ object Routes {
     const val ACCOUNTS = "accounts"
     const val IMPORT = "import"
     const val SETTINGS = "settings"
+    const val LOANS = "loans"
+    const val OVERDRAFT = "overdraft"
+    fun loan(id: Long) = "loan/$id"
     fun recurringEdit(id: Long) = "recurring/$id"
     fun accountEdit(id: Long) = "account/$id"
     fun transactionEdit(id: Long) = "transaction/$id"
@@ -130,11 +136,25 @@ fun AppRoot() {
                     onDone = { nav.popBackStack() },
                 )
             }
+            composable(Routes.LOANS) {
+                LoansScreen(onBack = { nav.popBackStack() }, onOpen = { nav.navigate(Routes.loan(it)) })
+            }
+            composable("loan/{id}", arguments = listOf(navArgument("id") { type = NavType.LongType })) { entry ->
+                LoanDetailScreen(
+                    loanId = entry.arguments?.getLong("id") ?: 0,
+                    onDone = { nav.popBackStack() },
+                )
+            }
+            composable(Routes.OVERDRAFT) {
+                OverdraftScreen(onBack = { nav.popBackStack() }, onEditAccount = { nav.navigate(Routes.accountEdit(it)) })
+            }
             composable(Routes.SETTINGS) { SettingsScreen(onBack = { nav.popBackStack() }) }
             composable(TopLevel.More.route) {
                 MoreScreen(
                     entries = listOf(
                         MoreEntry("Konten", "Konten anlegen, Kontostand und Dispo pflegen") { nav.navigate(Routes.ACCOUNTS) },
+                        MoreEntry("Kredite", "Restschuld, Zinsen und Tilgungsplan laufender Kredite") { nav.navigate(Routes.LOANS) },
+                        MoreEntry("Dispozinsen", "Was dich das Überziehen deiner Konten kostet") { nav.navigate(Routes.OVERDRAFT) },
                         MoreEntry("Einstellungen", "Budgetzeitraum und Reserve festlegen") { nav.navigate(Routes.SETTINGS) },
                         MoreEntry("Umsätze importieren", "CSV-Datei von DKB, N26, Amex, PayPal und anderen einlesen") { nav.navigate(Routes.IMPORT) },
                     ),

@@ -7,6 +7,8 @@ import net.jandev.financialanalyst.data.db.AccountWithBalance
 import net.jandev.financialanalyst.data.db.AppDatabase
 import net.jandev.financialanalyst.data.db.CategoryEntity
 import net.jandev.financialanalyst.data.db.CategoryRuleEntity
+import net.jandev.financialanalyst.data.db.LoanEntity
+import net.jandev.financialanalyst.data.db.LoanExtraPaymentEntity
 import net.jandev.financialanalyst.data.db.RecurringEntity
 import net.jandev.financialanalyst.data.db.TransactionEntity
 import net.jandev.financialanalyst.domain.CategoryKind
@@ -153,6 +155,23 @@ class FinanceRepository(private val db: AppDatabase) {
     }
 
     val recurring: Flow<List<RecurringEntity>> = db.recurring().observeAll()
+    val loans: Flow<List<LoanEntity>> = db.loans().observeAll()
+    val loanExtraPayments: Flow<List<LoanExtraPaymentEntity>> = db.loans().observeExtraPayments()
+
+    suspend fun loan(id: Long): LoanEntity? = db.loans().byId(id)
+
+    suspend fun saveLoan(loan: LoanEntity): Long {
+        val id = db.loans().upsert(loan)
+        return if (loan.id == 0L) id else loan.id
+    }
+
+    suspend fun deleteLoan(loan: LoanEntity) = db.loans().delete(loan)
+
+    suspend fun addExtraPayment(payment: LoanExtraPaymentEntity) = db.loans().insertExtra(payment)
+
+    suspend fun deleteExtraPayment(payment: LoanExtraPaymentEntity) = db.loans().deleteExtra(payment)
+
+    suspend fun transactionsOf(accountId: Long): List<TransactionEntity> = db.transactions().byAccount(accountId)
 
     suspend fun recurringItem(id: Long): RecurringEntity? = db.recurring().byId(id)
 
