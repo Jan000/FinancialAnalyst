@@ -29,7 +29,11 @@ import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
 import net.jandev.financialanalyst.ui.accounts.AccountEditScreen
 import net.jandev.financialanalyst.ui.accounts.AccountsScreen
+import androidx.compose.runtime.LaunchedEffect
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import net.jandev.financialanalyst.ui.common.EmptyState
+import net.jandev.financialanalyst.ui.common.LocalApp
+import net.jandev.financialanalyst.ui.importing.ImportScreen
 import net.jandev.financialanalyst.ui.common.Screen
 import net.jandev.financialanalyst.ui.more.MoreEntry
 import net.jandev.financialanalyst.ui.more.MoreScreen
@@ -48,6 +52,7 @@ enum class TopLevel(val route: String, val label: String, val icon: ImageVector)
 
 object Routes {
     const val ACCOUNTS = "accounts"
+    const val IMPORT = "import"
     fun accountEdit(id: Long) = "account/$id"
     fun transactionEdit(id: Long) = "transaction/$id"
 }
@@ -65,6 +70,15 @@ fun AppRoot() {
     val nav = rememberNavController()
     val backStackEntry by nav.currentBackStackEntryAsState()
     val currentDestination = backStackEntry?.destination
+
+    // Eine an die App übergebene Datei öffnet den Import, egal wo man gerade ist.
+    val app = LocalApp.current
+    val pendingImport by app.pendingImport.collectAsStateWithLifecycle()
+    LaunchedEffect(pendingImport) {
+        if (pendingImport != null && nav.currentDestination?.route != Routes.IMPORT) {
+            nav.navigate(Routes.IMPORT) { launchSingleTop = true }
+        }
+    }
 
     Scaffold(
         contentWindowInsets = WindowInsets(0),
@@ -106,7 +120,18 @@ fun AppRoot() {
                 MoreScreen(
                     entries = listOf(
                         MoreEntry("Konten", "Konten anlegen, Kontostand und Dispo pflegen") { nav.navigate(Routes.ACCOUNTS) },
+                        MoreEntry("Umsätze importieren", "CSV-Datei von DKB, N26, Amex, PayPal und anderen einlesen") { nav.navigate(Routes.IMPORT) },
                     ),
+                )
+            }
+            composable(Routes.IMPORT) {
+                ImportScreen(
+                    onBack = { nav.popBackStack() },
+                    onAddAccount = { nav.navigate(Routes.accountEdit(0)) },
+                    onFinished = {
+                        nav.popBackStack()
+                        nav.openTopLevel(TopLevel.Transactions)
+                    },
                 )
             }
             composable(Routes.ACCOUNTS) {

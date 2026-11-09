@@ -9,6 +9,13 @@ import net.jandev.financialanalyst.data.db.CategoryEntity
 import net.jandev.financialanalyst.data.db.CategoryRuleEntity
 import net.jandev.financialanalyst.data.db.TransactionEntity
 import net.jandev.financialanalyst.domain.DefaultCategories
+import net.jandev.financialanalyst.domain.ExistingTx
+import net.jandev.financialanalyst.domain.IncomingTx
+import net.jandev.financialanalyst.domain.Reconciler
+import net.jandev.financialanalyst.domain.Reconciliation
+import net.jandev.financialanalyst.domain.TxSource
+import net.jandev.financialanalyst.domain.TxStatus
+import net.jandev.financialanalyst.domain.csv.ImportedTx
 
 /** Zentrale Zugriffsschicht auf Konten, Umsätze und Kategorien. */
 class FinanceRepository(private val db: AppDatabase) {
@@ -71,4 +78,75 @@ class FinanceRepository(private val db: AppDatabase) {
         db.transactions().clearTransferPeer(transaction.id)
         db.transactions().delete(transaction)
     }
+
+    private suspend fun reconcile(accountId: Long, incoming: List<ImportedTx>, source: TxSource): Reconciliation<ImportedTx> {
+        val existing = db.transactions().byAccount(accountId).map {
+            ExistingTx(it.id, it.bookingDate, it.amountCents, it.externalId, it.source, it.status)
+        }
+        return Reconciler.reconcile(
+            existing,
+            incoming.map { IncomingTx(it.date, it.amountCents, it.externalId, it) },
+            source,
+        )
+    }
+
+    /** Was ein Import bewirken würde, ohne etwas zu speichern. */
+    suspend fun previewImport(accountId: Long, incoming: List<ImportedTx>, source: TxSource): ImportSummary {
+        val result = reconcile(accountId, incoming, source)
+        return ImportSummary(result.toInsert.size, result.toConfirm.size, result.duplicates)
+    }
+
+    /**
+     * Übernimmt gelieferte Umsätze in ein Konto. Bereits vorhandene werden übersprungen, vorläufige oder
+     * von Hand erfasste Einträge durch die gelieferte Buchung bestätigt.
+     * Mit [balanceAfterCents] wird der Kontostand anschließend auf den von der Bank genannten Wert gesetzt.
+     */
+    suspend fun importTransactions(
+        accountId: Long,
+        incoming: List<ImportedTx>,
+        source: TxSource,
+        status: TxStatus = TxStatus.BOOKED,
+        balanceAfterCents: Long? = null,
+    ): ImportSummary = db.withTransaction {
+        val result = reconcile(accountId, incoming, source)
+        db.transactions().insertAll(
+            result.toInsert.map {
+                TransactionEntity(
+                    accountId = accountId,
+                    bookingDate = it.date,
+                    valueDate = it.valueDate,
+                    amountCents = it.amountCents,
+                    counterparty = it.counterparty,
+                    purpose = it.purpose,
+                    externalId = it.externalId,
+                    status = status,
+                    source = source,
+                )
+            },
+        )
+        for ((id, tx) in result.toConfirm) {
+            val old = db.transactions().byId(id) ?: continue
+            db.transactions().update(
+                old.copy(
+                    bookingDate = tx.date,
+                    valueDate = tx.valueDate,
+                    counterparty = tx.counterparty.ifBlank { old.counterparty },
+                    purpose = tx.purpose.ifBlank { old.purpose },
+                    externalId = tx.externalId,
+                    status = status,
+                    source = source,
+                ),
+            )
+        }
+        if (balanceAfterCents != null) {
+            val account = db.accounts().byId(accountId)
+            if (account != null) {
+                val sum = db.transactions().byAccount(accountId).sumOf { it.amountCents }
+                db.accounts().update(account.copy(openingBalanceCents = balanceAfterCents - sum))
+            }
+        }
+        ImportSummary(result.toInsert.size, result.toConfirm.size, result.duplicates)
+    }
 }
+
+data class ImportSummary(val inserted: Int, val confirmed: Int, val duplicates: Int)
