@@ -4,7 +4,9 @@ import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.compose.runtime.CompositionLocalProvider
 import net.jandev.financialanalyst.ui.AppRoot
+import net.jandev.financialanalyst.ui.common.LocalApp
 import net.jandev.financialanalyst.ui.theme.FinanceTheme
 
 class MainActivity : ComponentActivity() {
@@ -13,7 +15,9 @@ class MainActivity : ComponentActivity() {
         enableEdgeToEdge()
         setContent {
             FinanceTheme {
-                AppRoot()
+                CompositionLocalProvider(LocalApp provides (application as FinanceApp).container) {
+                    AppRoot()
+                }
             }
         }
     }
