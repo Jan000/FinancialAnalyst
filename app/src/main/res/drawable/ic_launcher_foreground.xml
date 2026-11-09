@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Drei steigende Balken mit Trendlinie, innerhalb der sicheren Zone (66dp) des adaptiven Icons. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <path
+        android:fillColor="#7FD1AE"
+        android:pathData="M34,58h9v16h-9z" />
+    <path
+        android:fillColor="#B8E6CF"
+        android:pathData="M49.5,48h9v26h-9z" />
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M65,38h9v36h-9z" />
+    <path
+        android:strokeColor="#F2C14E"
+        android:strokeWidth="3"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round"
+        android:pathData="M34,48L48,38L58,42L74,28" />
+</vector>

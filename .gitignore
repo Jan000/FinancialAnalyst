@@ -1,0 +1,23 @@
+# Build
+.gradle/
+.kotlin/
+build/
+out/
+captures/
+
+# Lokale Konfiguration und Geheimnisse
+local.properties
+*.pem
+*.keystore
+*.jks
+secrets/
+
+# Echte Kontoauszüge und Exporte gehören nie ins Repo
+private-data/
+
+# IDE / OS
+.idea/
+.vscode/
+*.iml
+Thumbs.db
+.DS_Store
