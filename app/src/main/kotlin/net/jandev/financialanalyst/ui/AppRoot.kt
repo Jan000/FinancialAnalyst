@@ -32,13 +32,14 @@ import net.jandev.financialanalyst.ui.accounts.AccountsScreen
 import net.jandev.financialanalyst.ui.analysis.AnalysisScreen
 import androidx.compose.runtime.LaunchedEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import net.jandev.financialanalyst.ui.common.EmptyState
 import net.jandev.financialanalyst.ui.common.LocalApp
 import net.jandev.financialanalyst.ui.importing.ImportScreen
-import net.jandev.financialanalyst.ui.common.Screen
 import net.jandev.financialanalyst.ui.more.MoreEntry
 import net.jandev.financialanalyst.ui.more.MoreScreen
 import net.jandev.financialanalyst.ui.overview.OverviewScreen
+import net.jandev.financialanalyst.ui.recurring.RecurringEditScreen
+import net.jandev.financialanalyst.ui.recurring.RecurringScreen
+import net.jandev.financialanalyst.ui.settings.SettingsScreen
 import net.jandev.financialanalyst.ui.transactions.TransactionEditScreen
 import net.jandev.financialanalyst.ui.transactions.TransactionsScreen
 
@@ -54,6 +55,8 @@ enum class TopLevel(val route: String, val label: String, val icon: ImageVector)
 object Routes {
     const val ACCOUNTS = "accounts"
     const val IMPORT = "import"
+    const val SETTINGS = "settings"
+    fun recurringEdit(id: Long) = "recurring/$id"
     fun accountEdit(id: Long) = "account/$id"
     fun transactionEdit(id: Long) = "transaction/$id"
 }
@@ -107,6 +110,8 @@ fun AppRoot() {
                     onAddAccount = { nav.navigate(Routes.accountEdit(0)) },
                     onOpenTransactions = { nav.openTopLevel(TopLevel.Transactions) },
                     onEditTransaction = { nav.navigate(Routes.transactionEdit(it)) },
+                    onOpenRecurring = { nav.openTopLevel(TopLevel.Recurring) },
+                    onOpenSettings = { nav.navigate(Routes.SETTINGS) },
                 )
             }
             composable(TopLevel.Transactions.route) {
@@ -116,11 +121,21 @@ fun AppRoot() {
                 )
             }
             composable(TopLevel.Analysis.route) { AnalysisScreen() }
-            composable(TopLevel.Recurring.route) { ComingSoon("Fixkosten") }
+            composable(TopLevel.Recurring.route) {
+                RecurringScreen(onEdit = { nav.navigate(Routes.recurringEdit(it)) })
+            }
+            composable("recurring/{id}", arguments = listOf(navArgument("id") { type = NavType.LongType })) { entry ->
+                RecurringEditScreen(
+                    itemId = entry.arguments?.getLong("id") ?: 0,
+                    onDone = { nav.popBackStack() },
+                )
+            }
+            composable(Routes.SETTINGS) { SettingsScreen(onBack = { nav.popBackStack() }) }
             composable(TopLevel.More.route) {
                 MoreScreen(
                     entries = listOf(
                         MoreEntry("Konten", "Konten anlegen, Kontostand und Dispo pflegen") { nav.navigate(Routes.ACCOUNTS) },
+                        MoreEntry("Einstellungen", "Budgetzeitraum und Reserve festlegen") { nav.navigate(Routes.SETTINGS) },
                         MoreEntry("Umsätze importieren", "CSV-Datei von DKB, N26, Amex, PayPal und anderen einlesen") { nav.navigate(Routes.IMPORT) },
                     ),
                 )
@@ -151,16 +166,5 @@ fun AppRoot() {
                 )
             }
         }
-    }
-}
-
-@Composable
-private fun ComingSoon(title: String) {
-    Screen(title = title) { padding ->
-        EmptyState(
-            title = "Folgt in Kürze",
-            hint = "Dieser Bereich wird in einem der nächsten Schritte gebaut.",
-            modifier = Modifier.padding(padding),
-        )
     }
 }

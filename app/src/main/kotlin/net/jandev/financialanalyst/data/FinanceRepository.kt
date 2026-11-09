@@ -7,7 +7,9 @@ import net.jandev.financialanalyst.data.db.AccountWithBalance
 import net.jandev.financialanalyst.data.db.AppDatabase
 import net.jandev.financialanalyst.data.db.CategoryEntity
 import net.jandev.financialanalyst.data.db.CategoryRuleEntity
+import net.jandev.financialanalyst.data.db.RecurringEntity
 import net.jandev.financialanalyst.data.db.TransactionEntity
+import net.jandev.financialanalyst.domain.CategoryKind
 import net.jandev.financialanalyst.domain.CategoryRule
 import net.jandev.financialanalyst.domain.Categorizer
 import net.jandev.financialanalyst.domain.DefaultCategories
@@ -19,9 +21,11 @@ import net.jandev.financialanalyst.domain.ExistingTx
 import net.jandev.financialanalyst.domain.IncomingTx
 import net.jandev.financialanalyst.domain.Reconciler
 import net.jandev.financialanalyst.domain.Reconciliation
+import net.jandev.financialanalyst.domain.RecurringDetector
 import net.jandev.financialanalyst.domain.TxSource
 import net.jandev.financialanalyst.domain.TxStatus
 import net.jandev.financialanalyst.domain.csv.ImportedTx
+import java.time.LocalDate
 
 /** Zentrale Zugriffsschicht auf Konten, Umsätze und Kategorien. */
 class FinanceRepository(private val db: AppDatabase) {
@@ -146,6 +150,81 @@ class FinanceRepository(private val db: AppDatabase) {
                 Categorizer.merchantKey(it.counterparty) == key
         }
         if (affected.isNotEmpty()) db.transactions().updateAll(affected.map { it.copy(categoryId = categoryId) })
+    }
+
+    val recurring: Flow<List<RecurringEntity>> = db.recurring().observeAll()
+
+    suspend fun recurringItem(id: Long): RecurringEntity? = db.recurring().byId(id)
+
+    suspend fun saveRecurring(item: RecurringEntity): Long = db.recurring().upsert(
+        // Von Hand angelegte Posten bekommen den Schlüssel aus ihrem Namen, damit passende Umsätze sie fortschreiben.
+        if (item.detected) item else item.copy(matchKey = RecurringDetector.matchKey(item.name, item.amountCents)),
+    )
+
+    suspend fun deleteRecurring(item: RecurringEntity) = db.withTransaction {
+        if (item.detected) {
+            // Erkannte Posten nur ausblenden, sonst schlägt die Erkennung sie beim nächsten Lauf wieder vor.
+            db.recurring().upsert(item.copy(dismissed = true, active = false))
+        } else {
+            db.recurring().delete(item)
+        }
+    }
+
+    /** Gleicht die Dauerposten mit der Umsatzhistorie ab: neue erkennen, Termine und Beträge fortschreiben. */
+    suspend fun syncRecurring(today: LocalDate = LocalDate.now()) = db.withTransaction {
+        val transferCategories = db.categories().all().filter { it.kind == CategoryKind.TRANSFER }.map { it.id }.toSet()
+        val txs = db.transactions().all()
+            .filter { it.transferPeerId == null && it.categoryId !in transferCategories }
+            .map { it.toTx() }
+        val detected = RecurringDetector.detect(txs, today).associateBy { it.matchKey }
+        val existing = db.recurring().all()
+        val known = existing.associateBy { it.matchKey }
+
+        for ((key, found) in detected) {
+            val old = known[key]
+            when {
+                old == null -> db.recurring().upsert(
+                    RecurringEntity(
+                        name = found.name,
+                        matchKey = key,
+                        amountCents = found.amountCents,
+                        interval = found.interval,
+                        nextDue = found.nextDue,
+                        accountId = found.accountId,
+                        categoryId = found.categoryId,
+                        detected = true,
+                        previousAmountCents = found.previousAmountCents,
+                    ),
+                )
+                old.dismissed -> Unit
+                else -> db.recurring().upsert(
+                    old.copy(
+                        amountCents = found.amountCents,
+                        previousAmountCents = if (found.amountCents != old.amountCents) old.amountCents else old.previousAmountCents,
+                        interval = if (old.detected) found.interval else old.interval,
+                        nextDue = maxOf(found.nextDue, if (old.detected) found.nextDue else old.nextDue),
+                        categoryId = old.categoryId ?: found.categoryId,
+                        active = true,
+                    ),
+                )
+            }
+        }
+
+        val latestByKey = txs.groupBy { RecurringDetector.matchKey(it.counterparty, it.amountCents) }
+            .mapValues { entry -> entry.value.maxOf { it.date } }
+        for (old in existing) {
+            if (old.matchKey in detected || old.dismissed) continue
+            if (old.detected) {
+                // Nicht mehr erkannt und deutlich überfällig: läuft offenbar nicht mehr.
+                if (old.active && old.nextDue.plusDays(45) < today) db.recurring().upsert(old.copy(active = false))
+                continue
+            }
+            // Von Hand angelegt: Termin weiterschieben, sobald die passende Buchung da ist.
+            val latest = latestByKey[old.matchKey] ?: continue
+            var due = old.nextDue
+            while (due <= latest.plusDays(5)) due = old.interval.next(due)
+            if (due != old.nextDue) db.recurring().upsert(old.copy(nextDue = due))
+        }
     }
 
     private suspend fun reconcile(accountId: Long, incoming: List<ImportedTx>, source: TxSource): Reconciliation<ImportedTx> {
