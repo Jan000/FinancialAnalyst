@@ -29,6 +29,7 @@ import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
 import net.jandev.financialanalyst.ui.accounts.AccountEditScreen
 import net.jandev.financialanalyst.ui.accounts.AccountsScreen
+import net.jandev.financialanalyst.ui.analysis.AnalysisScreen
 import androidx.compose.runtime.LaunchedEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import net.jandev.financialanalyst.ui.common.EmptyState
@@ -114,7 +115,7 @@ fun AppRoot() {
                     onAddAccount = { nav.navigate(Routes.accountEdit(0)) },
                 )
             }
-            composable(TopLevel.Analysis.route) { ComingSoon("Analyse") }
+            composable(TopLevel.Analysis.route) { AnalysisScreen() }
             composable(TopLevel.Recurring.route) { ComingSoon("Fixkosten") }
             composable(TopLevel.More.route) {
                 MoreScreen(

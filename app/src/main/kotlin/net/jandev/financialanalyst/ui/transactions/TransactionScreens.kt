@@ -345,6 +345,11 @@ fun TransactionEditScreen(transactionId: Long, onDone: () -> Unit) {
                     )
                     scope.launch {
                         app.repository.saveTransaction(tx)
+                        val chosen = tx.categoryId
+                        if (chosen != null && chosen != base.categoryId) {
+                            app.repository.learnCategory(tx.counterparty, chosen)
+                        }
+                        app.afterTransactionsChanged()
                         onDone()
                     }
                 },

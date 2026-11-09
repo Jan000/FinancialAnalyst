@@ -8,7 +8,13 @@ import net.jandev.financialanalyst.data.db.AppDatabase
 import net.jandev.financialanalyst.data.db.CategoryEntity
 import net.jandev.financialanalyst.data.db.CategoryRuleEntity
 import net.jandev.financialanalyst.data.db.TransactionEntity
+import net.jandev.financialanalyst.domain.CategoryRule
+import net.jandev.financialanalyst.domain.Categorizer
 import net.jandev.financialanalyst.domain.DefaultCategories
+import net.jandev.financialanalyst.domain.OwnAccount
+import net.jandev.financialanalyst.domain.TransferCandidate
+import net.jandev.financialanalyst.domain.TransferDetector
+import net.jandev.financialanalyst.domain.Tx
 import net.jandev.financialanalyst.domain.ExistingTx
 import net.jandev.financialanalyst.domain.IncomingTx
 import net.jandev.financialanalyst.domain.Reconciler
@@ -77,6 +83,69 @@ class FinanceRepository(private val db: AppDatabase) {
     suspend fun deleteTransaction(transaction: TransactionEntity) = db.withTransaction {
         db.transactions().clearTransferPeer(transaction.id)
         db.transactions().delete(transaction)
+    }
+
+    /**
+     * Zieht abgeleitete Angaben nach: Kategorien für noch nicht zugeordnete Umsätze und
+     * Umbuchungen zwischen eigenen Konten. Vom Nutzer gesetzte Kategorien bleiben unberührt.
+     */
+    suspend fun enrich() = db.withTransaction {
+        val categories = db.categories().all()
+        val kinds = categories.associate { it.id to it.kind }
+        val transferCategory = categories.firstOrNull { it.builtinKey == DefaultCategories.KEY_TRANSFER }?.id
+        val categorizer = Categorizer(
+            db.categories().rules().mapNotNull { rule ->
+                kinds[rule.categoryId]?.let { CategoryRule(rule.pattern, rule.categoryId, it, rule.userDefined) }
+            },
+        )
+        val all = db.transactions().all()
+        val changed = HashMap<Long, TransactionEntity>()
+
+        for (tx in all) {
+            if (tx.categoryId != null || tx.categoryLocked) continue
+            val category = categorizer.categorize(tx.counterparty, tx.purpose, tx.amountCents) ?: continue
+            changed[tx.id] = tx.copy(categoryId = category)
+        }
+
+        val accounts = db.accounts().all().map { account ->
+            OwnAccount(
+                id = account.id,
+                iban = account.iban,
+                hints = listOf(account.institution, account.name).map { it.trim().lowercase() }.filter { it.length >= 3 },
+            )
+        }
+        if (accounts.size >= 2) {
+            val candidates = all.filter { it.transferPeerId == null }.map {
+                TransferCandidate(it.id, it.accountId, it.bookingDate, it.amountCents, it.counterparty, it.purpose)
+            }
+            val byId = all.associateBy { it.id }
+            for ((outId, inId) in TransferDetector.detect(accounts, candidates)) {
+                for ((id, peer) in listOf(outId to inId, inId to outId)) {
+                    val tx = changed[id] ?: byId[id] ?: continue
+                    changed[id] = tx.copy(
+                        transferPeerId = peer,
+                        categoryId = if (tx.categoryLocked) tx.categoryId else transferCategory ?: tx.categoryId,
+                    )
+                }
+            }
+        }
+        if (changed.isNotEmpty()) db.transactions().updateAll(changed.values.toList())
+    }
+
+    /**
+     * Merkt sich eine von Hand gewählte Kategorie für diesen Händler und wendet sie auf dessen
+     * übrige, nicht von Hand zugeordnete Umsätze an.
+     */
+    suspend fun learnCategory(counterparty: String, categoryId: Long) = db.withTransaction {
+        val key = Categorizer.merchantKey(counterparty)
+        if (key.length < 3) return@withTransaction
+        db.categories().deleteUserRule(key)
+        db.categories().insertRules(listOf(CategoryRuleEntity(pattern = key, categoryId = categoryId, userDefined = true)))
+        val affected = db.transactions().all().filter {
+            !it.categoryLocked && it.categoryId != categoryId && it.transferPeerId == null &&
+                Categorizer.merchantKey(it.counterparty) == key
+        }
+        if (affected.isNotEmpty()) db.transactions().updateAll(affected.map { it.copy(categoryId = categoryId) })
     }
 
     private suspend fun reconcile(accountId: Long, incoming: List<ImportedTx>, source: TxSource): Reconciliation<ImportedTx> {
@@ -148,5 +217,16 @@ class FinanceRepository(private val db: AppDatabase) {
         ImportSummary(result.toInsert.size, result.toConfirm.size, result.duplicates)
     }
 }
+
+fun TransactionEntity.toTx(): Tx = Tx(
+    id = id,
+    accountId = accountId,
+    date = bookingDate,
+    amountCents = amountCents,
+    counterparty = counterparty,
+    purpose = purpose,
+    categoryId = categoryId,
+    isTransfer = transferPeerId != null,
+)
 
 data class ImportSummary(val inserted: Int, val confirmed: Int, val duplicates: Int)

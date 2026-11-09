@@ -20,5 +20,6 @@ class AppContainer(context: Context) {
 
     /** Nach Import oder Bankabruf: abgeleitete Daten (Kategorien, Umbuchungen, Dauerposten) nachziehen. */
     suspend fun afterTransactionsChanged() {
+        repository.enrich()
     }
 }

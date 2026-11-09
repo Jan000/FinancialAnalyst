@@ -16,8 +16,12 @@ data class FinanceColors(
     val income: Color,
     val expense: Color,
     val warning: Color,
+    /** Diagrammfarben für Einnahmen und Ausgaben; mit dem Palettenprüfer der Dataviz-Vorgaben validiert. */
+    val chartIncome: Color,
+    val chartExpense: Color,
     /** Kategorische Palette für Diagramme, in fester Reihenfolge. */
     val chart: List<Color>,
+    val chartGrid: Color,
 )
 
 private val LightScheme = lightColorScheme(
@@ -88,20 +92,26 @@ private val LightFinance = FinanceColors(
     income = Color(0xFF1B7F4B),
     expense = Color(0xFFB3382C),
     warning = Color(0xFF9A6700),
+    chartIncome = Color(0xFF1BAF7A),
+    chartExpense = Color(0xFFEB6834),
     chart = listOf(
-        Color(0xFF0F766E), Color(0xFFC2571A), Color(0xFF3B5BA9), Color(0xFF9C4F96),
-        Color(0xFF7A8B1E), Color(0xFFB7791F), Color(0xFF2E86AB), Color(0xFF8D6E63),
+        Color(0xFF2A78D6), Color(0xFFEB6834), Color(0xFF1BAF7A), Color(0xFFEDA100),
+        Color(0xFFE87BA4), Color(0xFF008300), Color(0xFF6250D6), Color(0xFFE34948),
     ),
+    chartGrid = Color(0xFFE1E0D9),
 )
 
 private val DarkFinance = FinanceColors(
     income = Color(0xFF6FD39A),
     expense = Color(0xFFFF9A8C),
     warning = Color(0xFFF2C14E),
+    chartIncome = Color(0xFF199E70),
+    chartExpense = Color(0xFFD95926),
     chart = listOf(
-        Color(0xFF5EC4B6), Color(0xFFF0955A), Color(0xFF8EA8F0), Color(0xFFD99AD3),
-        Color(0xFFBCCB5A), Color(0xFFE5B35A), Color(0xFF79C4E0), Color(0xFFC4A79C),
+        Color(0xFF3987E5), Color(0xFFD95926), Color(0xFF199E70), Color(0xFFC98500),
+        Color(0xFFD55181), Color(0xFF008300), Color(0xFF9085E9), Color(0xFFE66767),
     ),
+    chartGrid = Color(0xFF2C2C2A),
 )
 
 val LocalFinanceColors = staticCompositionLocalOf { LightFinance }

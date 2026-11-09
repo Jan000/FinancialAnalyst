@@ -10,6 +10,9 @@ class FinanceApp : Application() {
     override fun onCreate() {
         super.onCreate()
         container = AppContainer(this)
-        container.appScope.launch { container.repository.seedDefaults() }
+        container.appScope.launch {
+            container.repository.seedDefaults()
+            container.afterTransactionsChanged()
+        }
     }
 }
