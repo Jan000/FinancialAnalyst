@@ -8,6 +8,8 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.MutableStateFlow
 import net.jandev.financialanalyst.data.FinanceRepository
 import net.jandev.financialanalyst.data.SettingsStore
+import net.jandev.financialanalyst.data.backup.BackupManager
+import net.jandev.financialanalyst.data.backup.DriveBackup
 import net.jandev.financialanalyst.data.banking.BankCredentials
 import net.jandev.financialanalyst.data.banking.BankSync
 import net.jandev.financialanalyst.data.banking.SyncReport
@@ -21,6 +23,8 @@ class AppContainer(context: Context) {
     val repository = FinanceRepository(db)
     val settings = SettingsStore(context)
     val bankSync = BankSync(db, repository, BankCredentials(context), afterChange = { afterTransactionsChanged() })
+    val backups = BackupManager(context, db, settings)
+    val driveBackup = DriveBackup(context, backups)
     val notificationMapping = NotificationMapping(context)
     val lastSyncReport = MutableStateFlow<SyncReport?>(null)
 

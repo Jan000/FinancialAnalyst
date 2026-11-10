@@ -43,6 +43,7 @@ import net.jandev.financialanalyst.ui.more.MoreScreen
 import net.jandev.financialanalyst.ui.overview.OverviewScreen
 import net.jandev.financialanalyst.ui.recurring.RecurringEditScreen
 import net.jandev.financialanalyst.ui.recurring.RecurringScreen
+import net.jandev.financialanalyst.ui.settings.BackupScreen
 import net.jandev.financialanalyst.ui.settings.NotificationScreen
 import net.jandev.financialanalyst.ui.settings.SettingsScreen
 import net.jandev.financialanalyst.ui.transactions.TransactionEditScreen
@@ -62,6 +63,7 @@ object Routes {
     const val IMPORT = "import"
     const val SETTINGS = "settings"
     const val LOANS = "loans"
+    const val BACKUP = "backup"
     const val NOTIFICATIONS = "notifications"
     const val BANKS = "banks"
     const val OVERDRAFT = "overdraft"
@@ -148,6 +150,7 @@ fun AppRoot() {
             }
             composable(Routes.BANKS) { BankScreen(onBack = { nav.popBackStack() }) }
             composable(Routes.NOTIFICATIONS) { NotificationScreen(onBack = { nav.popBackStack() }) }
+            composable(Routes.BACKUP) { BackupScreen(onBack = { nav.popBackStack() }) }
             composable(Routes.LOANS) {
                 LoansScreen(onBack = { nav.popBackStack() }, onOpen = { nav.navigate(Routes.loan(it)) })
             }
@@ -169,7 +172,8 @@ fun AppRoot() {
                         MoreEntry("Zahlungen sofort erfassen", "Benachrichtigungen der Banking-Apps als vorläufige Umsätze mitlesen") { nav.navigate(Routes.NOTIFICATIONS) },
                         MoreEntry("Kredite", "Restschuld, Zinsen und Tilgungsplan laufender Kredite") { nav.navigate(Routes.LOANS) },
                         MoreEntry("Dispozinsen", "Was dich das Überziehen deiner Konten kostet") { nav.navigate(Routes.OVERDRAFT) },
-                        MoreEntry("Einstellungen", "Budgetzeitraum und Reserve festlegen") { nav.navigate(Routes.SETTINGS) },
+                        MoreEntry("Sicherung", "Verschlüsselt in Google Drive oder als Datei sichern und wiederherstellen") { nav.navigate(Routes.BACKUP) },
+                        MoreEntry("Einstellungen", "Budgetzeitraum, Reserve und App-Sperre") { nav.navigate(Routes.SETTINGS) },
                         MoreEntry("Umsätze importieren", "CSV-Datei von DKB, N26, Amex, PayPal und anderen einlesen") { nav.navigate(Routes.IMPORT) },
                     ),
                 )

@@ -8,7 +8,10 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.foundation.layout.Row
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
+import androidx.compose.ui.Alignment
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -84,6 +87,19 @@ fun SettingsScreen(onBack: () -> Unit, extraSections: @Composable () -> Unit = {
                     label = "Reserve am Ende des Zeitraums",
                     supportingText = "Puffer oder Sparrate, die nicht ins Tagesbudget einfließt",
                 )
+            }
+            SectionCard(title = "Schutz") {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Column(Modifier.weight(1f)) {
+                        Text("App-Sperre")
+                        Text(
+                            "Beim Öffnen mit Fingerabdruck, Gesicht oder Geräte-PIN entsperren; der Inhalt wird in der App-Übersicht verborgen",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    Switch(checked = settings.appLock, onCheckedChange = { save(settings.copy(appLock = it)) })
+                }
             }
             extraSections()
         }

@@ -3,29 +3,118 @@ package net.jandev.financialanalyst
 import android.content.Intent
 import android.net.Uri
 import android.os.Bundle
-import androidx.activity.ComponentActivity
+import android.os.SystemClock
+import android.view.WindowManager
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.biometric.BiometricManager.Authenticators.BIOMETRIC_WEAK
+import androidx.biometric.BiometricManager.Authenticators.DEVICE_CREDENTIAL
+import androidx.biometric.BiometricPrompt
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.padding
+import androidx.compose.material3.Button
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Surface
+import androidx.compose.material3.Text
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.unit.dp
+import androidx.core.content.ContextCompat
 import androidx.core.content.IntentCompat
+import androidx.fragment.app.FragmentActivity
+import androidx.lifecycle.lifecycleScope
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.runBlocking
 import net.jandev.financialanalyst.ui.AppRoot
 import net.jandev.financialanalyst.ui.common.LocalApp
 import net.jandev.financialanalyst.ui.theme.FinanceTheme
 
-class MainActivity : ComponentActivity() {
+class MainActivity : FragmentActivity() {
     private val container get() = (application as FinanceApp).container
+
+    private var lockEnabled = false
+    private var locked by mutableStateOf(false)
+    private var leftAt = 0L
+    private var promptShowing = false
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
+        // Einmal synchron lesen, damit beim Start nichts Ungeschütztes aufblitzt.
+        applyLockSetting(runBlocking { container.settings.settings.first() }.appLock, initial = true)
+        lifecycleScope.launch {
+            container.settings.settings.collect { applyLockSetting(it.appLock, initial = false) }
+        }
         if (savedInstanceState == null) handleIntent(intent)
         setContent {
             FinanceTheme {
                 CompositionLocalProvider(LocalApp provides container) {
-                    AppRoot()
+                    if (locked) LockScreen(onUnlock = ::promptUnlock) else AppRoot()
                 }
             }
         }
+    }
+
+    private fun applyLockSetting(enabled: Boolean, initial: Boolean) {
+        if (enabled == lockEnabled && !initial) return
+        lockEnabled = enabled
+        if (enabled) {
+            // Kein Inhalt in der App-Übersicht und keine Screenshots, solange die Sperre aktiv ist.
+            window.addFlags(WindowManager.LayoutParams.FLAG_SECURE)
+            if (initial) locked = true
+        } else {
+            window.clearFlags(WindowManager.LayoutParams.FLAG_SECURE)
+            locked = false
+        }
+    }
+
+    override fun onStop() {
+        super.onStop()
+        leftAt = SystemClock.elapsedRealtime()
+    }
+
+    override fun onStart() {
+        super.onStart()
+        if (lockEnabled && leftAt != 0L && SystemClock.elapsedRealtime() - leftAt > RELOCK_AFTER_MS) locked = true
+        if (locked) promptUnlock()
+    }
+
+    private fun promptUnlock() {
+        if (promptShowing) return
+        promptShowing = true
+        val prompt = BiometricPrompt(
+            this,
+            ContextCompat.getMainExecutor(this),
+            object : BiometricPrompt.AuthenticationCallback() {
+                override fun onAuthenticationSucceeded(result: BiometricPrompt.AuthenticationResult) {
+                    promptShowing = false
+                    locked = false
+                }
+
+                override fun onAuthenticationError(errorCode: Int, errString: CharSequence) {
+                    promptShowing = false
+                    // Ohne eingerichtete Gerätesperre gibt es nichts, womit man entsperren könnte: nicht aussperren.
+                    if (errorCode == BiometricPrompt.ERROR_NO_DEVICE_CREDENTIAL || errorCode == BiometricPrompt.ERROR_HW_NOT_PRESENT ||
+                        errorCode == BiometricPrompt.ERROR_NO_BIOMETRICS
+                    ) {
+                        locked = false
+                    }
+                }
+            },
+        )
+        prompt.authenticate(
+            BiometricPrompt.PromptInfo.Builder()
+                .setTitle("Finanzanalyst entsperren")
+                .setAllowedAuthenticators(BIOMETRIC_WEAK or DEVICE_CREDENTIAL)
+                .build(),
+        )
     }
 
     override fun onNewIntent(intent: Intent) {
@@ -33,7 +122,7 @@ class MainActivity : ComponentActivity() {
         handleIntent(intent)
     }
 
-    /** Eine geteilte oder geöffnete Datei landet im Import-Bildschirm. */
+    /** Eine geteilte oder geöffnete Datei landet im Import-Bildschirm, der Rücksprung der Bank bei den Bankverbindungen. */
     private fun handleIntent(intent: Intent?) {
         val data = intent?.data
         if (intent?.action == Intent.ACTION_VIEW && data?.scheme == "finanzanalyst") {
@@ -46,5 +135,24 @@ class MainActivity : ComponentActivity() {
             else -> null
         }
         if (uri != null) container.pendingImport.value = uri
+    }
+
+    companion object {
+        /** Kurz die App wechseln (TAN-App, Browser) soll nicht jedes Mal neu sperren. */
+        private const val RELOCK_AFTER_MS = 60_000L
+    }
+}
+
+@androidx.compose.runtime.Composable
+private fun LockScreen(onUnlock: () -> Unit) {
+    Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
+        Column(
+            modifier = Modifier.fillMaxSize().padding(32.dp),
+            verticalArrangement = Arrangement.spacedBy(16.dp, Alignment.CenterVertically),
+            horizontalAlignment = Alignment.CenterHorizontally,
+        ) {
+            Text("Finanzanalyst ist gesperrt", style = MaterialTheme.typography.titleLarge)
+            Button(onClick = onUnlock) { Text("Entsperren") }
+        }
     }
 }
