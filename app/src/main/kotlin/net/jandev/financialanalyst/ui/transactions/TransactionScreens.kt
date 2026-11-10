@@ -59,7 +59,16 @@ import net.jandev.financialanalyst.ui.common.MoneyField
 import net.jandev.financialanalyst.ui.common.Screen
 import net.jandev.financialanalyst.ui.common.longLabel
 import net.jandev.financialanalyst.ui.common.toFieldText
+import androidx.compose.foundation.background
 import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
+import net.jandev.financialanalyst.data.db.GroupEntity
+import net.jandev.financialanalyst.ui.theme.LocalFinanceColors
 import java.time.LocalDate
 import kotlin.math.abs
 
@@ -74,6 +83,10 @@ fun TransactionsScreen(onEdit: (Long) -> Unit, onAddAccount: () -> Unit) {
 
     val accountNames = remember(accounts) { accounts.associate { it.account.id to it.account.name } }
     val categoryNames = remember(categories) { categories.associate { it.id to it.name } }
+    val groups by app.repository.groups.collectAsStateWithLifecycle(initialValue = emptyList())
+    val palette = LocalFinanceColors.current.chart
+    val categoryColors = remember(categories, palette) { categories.associate { it.id to palette[it.colorIndex.mod(palette.size)] } }
+    val groupMarks = remember(groups, palette) { groups.associate { it.id to (it.name to palette[it.colorIndex.mod(palette.size)]) } }
 
     Screen(
         title = "Umsätze",
@@ -98,7 +111,7 @@ fun TransactionsScreen(onEdit: (Long) -> Unit, onAddAccount: () -> Unit) {
             }
             return@Screen
         }
-        val filtered = remember(all, query, categoryNames) {
+        val filtered = remember(all, query, categoryNames, groupMarks) {
             val q = query.trim().lowercase()
             if (q.isEmpty()) {
                 all
@@ -106,6 +119,7 @@ fun TransactionsScreen(onEdit: (Long) -> Unit, onAddAccount: () -> Unit) {
                 all.filter {
                     it.counterparty.lowercase().contains(q) ||
                         it.purpose.lowercase().contains(q) ||
+                        groupMarks[it.groupId]?.first?.lowercase()?.contains(q) == true ||
                         categoryNames[it.categoryId]?.lowercase()?.contains(q) == true ||
                         Money.format(abs(it.amountCents)).contains(q)
                 }
@@ -153,6 +167,8 @@ fun TransactionsScreen(onEdit: (Long) -> Unit, onAddAccount: () -> Unit) {
                                 ).joinToString(" · "),
                                 onClick = { onEdit(tx.id) },
                                 onLongClick = { pickingId = tx.id },
+                                categoryColor = categoryColors[tx.categoryId] ?: MaterialTheme.colorScheme.outlineVariant,
+                                group = groupMarks[tx.groupId],
                             )
                         }
                     }
@@ -192,6 +208,10 @@ fun TransactionRow(
     onClick: (() -> Unit)? = null,
     horizontalPadding: Dp = 16.dp,
     onLongClick: (() -> Unit)? = null,
+    /** Farbpunkt der Kategorie; die Kategorie steht zusätzlich immer als Text da. */
+    categoryColor: Color? = null,
+    /** Name und Farbe der Gruppe, zu der der Umsatz gehört. */
+    group: Pair<String, Color>? = null,
 ) {
     Row(
         modifier = Modifier
@@ -206,6 +226,9 @@ fun TransactionRow(
             .padding(horizontal = horizontalPadding, vertical = 10.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
+        if (categoryColor != null) {
+            Box(Modifier.padding(end = 12.dp).size(10.dp).clip(CircleShape).background(categoryColor))
+        }
         Column(Modifier.weight(1f).padding(end = 12.dp)) {
             Text(
                 tx.counterparty.ifBlank { tx.purpose.ifBlank { "Ohne Bezeichnung" } },
@@ -220,6 +243,25 @@ fun TransactionRow(
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
             )
+            if (group != null) {
+                Row(
+                    modifier = Modifier
+                        .padding(top = 4.dp)
+                        .clip(RoundedCornerShape(6.dp))
+                        .background(MaterialTheme.colorScheme.surfaceContainerHigh)
+                        .padding(horizontal = 6.dp, vertical = 2.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Box(Modifier.size(8.dp).clip(CircleShape).background(group.second))
+                    Text(
+                        group.first,
+                        style = MaterialTheme.typography.labelSmall,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.padding(start = 6.dp),
+                    )
+                }
+            }
         }
         AmountText(tx.amountCents)
     }
@@ -238,6 +280,8 @@ fun TransactionEditScreen(transactionId: Long, onDone: () -> Unit) {
     var amount by rememberSaveable { mutableStateOf("") }
     var accountId by rememberSaveable { mutableStateOf<Long?>(null) }
     var categoryId by rememberSaveable { mutableStateOf<Long?>(null) }
+    var groupId by rememberSaveable { mutableStateOf<Long?>(null) }
+    val groups by app.repository.groups.collectAsStateWithLifecycle(initialValue = emptyList())
     var epochDay by rememberSaveable { mutableStateOf(LocalDate.now().toEpochDay()) }
     var counterparty by rememberSaveable { mutableStateOf("") }
     var purpose by rememberSaveable { mutableStateOf("") }
@@ -252,6 +296,7 @@ fun TransactionEditScreen(transactionId: Long, onDone: () -> Unit) {
             amount = abs(tx.amountCents).toFieldText()
             accountId = tx.accountId
             categoryId = tx.categoryId
+            groupId = tx.groupId
             epochDay = tx.bookingDate.toEpochDay()
             counterparty = tx.counterparty
             purpose = tx.purpose
@@ -343,6 +388,17 @@ fun TransactionEditScreen(transactionId: Long, onDone: () -> Unit) {
                 optionLabel = { it.name },
                 placeholder = "Ohne Kategorie",
             )
+            if (groups.isNotEmpty()) {
+                val none = GroupEntity(id = 0, name = "Keine Gruppe")
+                DropdownField(
+                    label = "Gruppe",
+                    options = listOf(none) + groups,
+                    selected = groups.firstOrNull { it.id == groupId },
+                    onSelect = { groupId = it.id.takeIf { id -> id != 0L } },
+                    optionLabel = { it.name },
+                    placeholder = "Keine Gruppe",
+                )
+            }
             Button(
                 enabled = valid,
                 onClick = {
@@ -355,6 +411,7 @@ fun TransactionEditScreen(transactionId: Long, onDone: () -> Unit) {
                         counterparty = counterparty.trim(),
                         purpose = purpose.trim(),
                         categoryId = categoryId,
+                        groupId = groupId,
                         categoryLocked = categoryId != null && (base.categoryLocked || categoryId != base.categoryId),
                     )
                     scope.launch {

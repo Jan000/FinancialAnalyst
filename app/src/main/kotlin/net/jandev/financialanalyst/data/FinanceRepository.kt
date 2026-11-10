@@ -10,6 +10,7 @@ import net.jandev.financialanalyst.data.db.BudgetEntity
 import net.jandev.financialanalyst.data.db.SavingsGoalEntity
 import net.jandev.financialanalyst.data.db.CategoryEntity
 import net.jandev.financialanalyst.data.db.CategoryRuleEntity
+import net.jandev.financialanalyst.data.db.GroupEntity
 import net.jandev.financialanalyst.data.db.LoanEntity
 import net.jandev.financialanalyst.data.db.LoanExtraPaymentEntity
 import net.jandev.financialanalyst.data.db.LoanRateChangeEntity
@@ -220,6 +221,25 @@ class FinanceRepository(
                 (sign == null || it.matchKey.endsWith(if (sign < 0) "|-" else "|+"))
         }
         if (items.isNotEmpty()) db.recurring().updateAll(items.map { it.copy(categoryId = categoryId) })
+    }
+
+    val groups: Flow<List<GroupEntity>> = db.groups().observeAll()
+
+    /** Liefert die ID der gespeicherten Gruppe. */
+    suspend fun saveGroup(group: GroupEntity): Long {
+        val id = db.groups().upsert(group)
+        return if (group.id == 0L) id else group.id
+    }
+
+    suspend fun deleteGroup(group: GroupEntity) = db.withTransaction {
+        db.transactions().clearGroup(group.id)
+        db.groups().delete(group)
+    }
+
+    /** Legt Umsätze in eine Gruppe; `null` nimmt sie heraus. */
+    suspend fun setGroup(transactionIds: List<Long>, groupId: Long?) {
+        // In Blöcken, damit die Parameterzahl einer SQL-Anweisung nicht überschritten wird.
+        transactionIds.chunked(500).forEach { db.transactions().setGroup(it, groupId) }
     }
 
     val recurring: Flow<List<RecurringEntity>> = db.recurring().observeAll()

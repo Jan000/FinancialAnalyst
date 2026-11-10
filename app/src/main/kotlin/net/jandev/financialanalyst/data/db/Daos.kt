@@ -87,6 +87,24 @@ interface TransactionDao {
 
     @Query("UPDATE transactions SET recurringId = NULL WHERE recurringId = :recurringId")
     suspend fun clearRecurring(recurringId: Long)
+
+    @Query("UPDATE transactions SET groupId = :groupId WHERE id IN (:ids)")
+    suspend fun setGroup(ids: List<Long>, groupId: Long?)
+
+    @Query("UPDATE transactions SET groupId = NULL WHERE groupId = :groupId")
+    suspend fun clearGroup(groupId: Long)
+}
+
+@Dao
+interface GroupDao {
+    @Query("SELECT * FROM tx_groups ORDER BY name COLLATE NOCASE")
+    fun observeAll(): Flow<List<GroupEntity>>
+
+    @Upsert
+    suspend fun upsert(group: GroupEntity): Long
+
+    @Delete
+    suspend fun delete(group: GroupEntity)
 }
 
 @Dao

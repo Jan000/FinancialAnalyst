@@ -84,6 +84,18 @@ data class TransactionEntity(
     val transferPeerId: Long? = null,
     val recurringId: Long? = null,
     val note: String = "",
+    /** Gruppe (Projekt, Vorhaben), zu der der Umsatz gehört. */
+    val groupId: Long? = null,
+)
+
+/** Frei gewählte Zusammenfassung von Umsätzen, etwa alle Bestellungen und Erstattungen eines Projekts. */
+@Entity(tableName = "tx_groups")
+data class GroupEntity(
+    @PrimaryKey(autoGenerate = true) val id: Long = 0,
+    val name: String,
+    /** Position in der festen Farbpalette. */
+    val colorIndex: Int = 0,
+    val note: String = "",
 )
 
 @Entity(tableName = "categories")
