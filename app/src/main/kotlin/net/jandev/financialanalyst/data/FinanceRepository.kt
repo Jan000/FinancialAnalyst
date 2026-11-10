@@ -307,6 +307,15 @@ class FinanceRepository(private val db: AppDatabase) {
                 ),
             )
         }
+        if (source == TxSource.API || source == TxSource.IMPORT) {
+            // Vorläufige Einträge aus Benachrichtigungen, die nach einer Woche keine Buchung bestätigt hat,
+            // sind unter anderem Betrag gebucht worden (Trinkgeld, Fremdwährung) oder storniert: weg damit.
+            val cutoff = LocalDate.now().minusDays(7)
+            val stale = db.transactions().byAccount(accountId).filter {
+                it.source == TxSource.NOTIFICATION && it.status == TxStatus.PENDING && it.bookingDate < cutoff
+            }
+            if (stale.isNotEmpty()) db.transactions().deleteByIds(stale.map { it.id })
+        }
         if (balanceAfterCents != null) {
             val account = db.accounts().byId(accountId)
             if (account != null) {

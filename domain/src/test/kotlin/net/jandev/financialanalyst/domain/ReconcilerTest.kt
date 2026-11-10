@@ -79,6 +79,16 @@ class ReconcilerTest {
     }
 
     @Test
+    fun notificationIsNotSwallowedByYesterdaysEqualBooking() {
+        val result = Reconciler.reconcile(
+            listOf(existing(1, -250, TxSource.API, ext = "b1", date = day.minusDays(1))),
+            listOf(incoming("push", -250, "nt:1")),
+            TxSource.NOTIFICATION,
+        )
+        assertEquals(listOf("push"), result.toInsert)
+    }
+
+    @Test
     fun notificationForAlreadyBookedTransactionIsDropped() {
         val result = Reconciler.reconcile(
             listOf(existing(1, -250, TxSource.MANUAL)),

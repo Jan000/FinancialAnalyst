@@ -57,7 +57,14 @@ object Reconciler {
             val match = existing
                 .asSequence()
                 .filter { it.id !in claimed && it.amountCents == tx.amountCents && it.source != incomingSource }
-                .filter { abs(it.date.toEpochDay() - tx.date.toEpochDay()) <= DATE_TOLERANCE_DAYS }
+                .filter {
+                    if (incomingSource == TxSource.NOTIFICATION) {
+                        // Eine Benachrichtigung kommt vor der Buchung: nur ein heute von Hand erfasster Eintrag kann derselbe Umsatz sein.
+                        it.source == TxSource.MANUAL && it.date == tx.date
+                    } else {
+                        abs(it.date.toEpochDay() - tx.date.toEpochDay()) <= DATE_TOLERANCE_DAYS
+                    }
+                }
                 .minByOrNull { abs(it.date.toEpochDay() - tx.date.toEpochDay()) }
             when {
                 match == null -> toInsert.add(tx.payload)

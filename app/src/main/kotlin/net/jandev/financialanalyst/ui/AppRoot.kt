@@ -43,6 +43,7 @@ import net.jandev.financialanalyst.ui.more.MoreScreen
 import net.jandev.financialanalyst.ui.overview.OverviewScreen
 import net.jandev.financialanalyst.ui.recurring.RecurringEditScreen
 import net.jandev.financialanalyst.ui.recurring.RecurringScreen
+import net.jandev.financialanalyst.ui.settings.NotificationScreen
 import net.jandev.financialanalyst.ui.settings.SettingsScreen
 import net.jandev.financialanalyst.ui.transactions.TransactionEditScreen
 import net.jandev.financialanalyst.ui.transactions.TransactionsScreen
@@ -61,6 +62,7 @@ object Routes {
     const val IMPORT = "import"
     const val SETTINGS = "settings"
     const val LOANS = "loans"
+    const val NOTIFICATIONS = "notifications"
     const val BANKS = "banks"
     const val OVERDRAFT = "overdraft"
     fun loan(id: Long) = "loan/$id"
@@ -145,6 +147,7 @@ fun AppRoot() {
                 )
             }
             composable(Routes.BANKS) { BankScreen(onBack = { nav.popBackStack() }) }
+            composable(Routes.NOTIFICATIONS) { NotificationScreen(onBack = { nav.popBackStack() }) }
             composable(Routes.LOANS) {
                 LoansScreen(onBack = { nav.popBackStack() }, onOpen = { nav.navigate(Routes.loan(it)) })
             }
@@ -163,6 +166,7 @@ fun AppRoot() {
                     entries = listOf(
                         MoreEntry("Konten", "Konten anlegen, Kontostand und Dispo pflegen") { nav.navigate(Routes.ACCOUNTS) },
                         MoreEntry("Bankverbindungen", "Umsätze automatisch direkt von der Bank abrufen") { nav.navigate(Routes.BANKS) },
+                        MoreEntry("Zahlungen sofort erfassen", "Benachrichtigungen der Banking-Apps als vorläufige Umsätze mitlesen") { nav.navigate(Routes.NOTIFICATIONS) },
                         MoreEntry("Kredite", "Restschuld, Zinsen und Tilgungsplan laufender Kredite") { nav.navigate(Routes.LOANS) },
                         MoreEntry("Dispozinsen", "Was dich das Überziehen deiner Konten kostet") { nav.navigate(Routes.OVERDRAFT) },
                         MoreEntry("Einstellungen", "Budgetzeitraum und Reserve festlegen") { nav.navigate(Routes.SETTINGS) },

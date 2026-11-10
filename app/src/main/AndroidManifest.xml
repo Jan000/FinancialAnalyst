@@ -4,6 +4,21 @@
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
 
+    <!-- Um zu erkennen, welche der unterstützten Banking-Apps installiert sind. -->
+    <queries>
+        <package android:name="de.number26.android" />
+        <package android:name="de.traderepublic.app" />
+        <package android:name="com.dkbcodefactory.banking" />
+        <package android:name="de.dkb.portalapp" />
+        <package android:name="com.paypal.android.p2pmobile" />
+        <package android:name="com.americanexpress.android.acctsvcs.de" />
+        <package android:name="com.google.android.apps.walletnfcrel" />
+        <package android:name="de.ingdiba.bankingapp" />
+        <package android:name="com.starfinanz.smob.android.sfinanzstatus" />
+        <package android:name="de.comdirect.android" />
+        <package android:name="com.revolut.revolut" />
+    </queries>
+
     <application
         android:name=".FinanceApp"
         android:allowBackup="false"
@@ -47,5 +62,16 @@
                 <data android:scheme="finanzanalyst" android:host="callback" />
             </intent-filter>
         </activity>
+
+        <!-- Liest Zahlungs-Pushs der vom Nutzer zugeordneten Banking-Apps; Freigabe in den Android-Einstellungen. -->
+        <service
+            android:name=".data.notifications.PaymentNotificationListener"
+            android:exported="true"
+            android:label="Zahlungen sofort erfassen"
+            android:permission="android.permission.BIND_NOTIFICATION_LISTENER_SERVICE">
+            <intent-filter>
+                <action android:name="android.service.notification.NotificationListenerService" />
+            </intent-filter>
+        </service>
     </application>
 </manifest>
