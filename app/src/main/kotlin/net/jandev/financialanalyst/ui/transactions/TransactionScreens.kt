@@ -59,6 +59,7 @@ import net.jandev.financialanalyst.ui.common.MoneyField
 import net.jandev.financialanalyst.ui.common.Screen
 import net.jandev.financialanalyst.ui.common.longLabel
 import net.jandev.financialanalyst.ui.common.toFieldText
+import androidx.compose.foundation.combinedClickable
 import java.time.LocalDate
 import kotlin.math.abs
 
@@ -69,6 +70,7 @@ fun TransactionsScreen(onEdit: (Long) -> Unit, onAddAccount: () -> Unit) {
     val accounts by app.repository.accounts.collectAsStateWithLifecycle(initialValue = emptyList())
     val categories by app.repository.categories.collectAsStateWithLifecycle(initialValue = emptyList())
     var query by rememberSaveable { mutableStateOf("") }
+    var pickingId by rememberSaveable { mutableStateOf<Long?>(null) }
 
     val accountNames = remember(accounts) { accounts.associate { it.account.id to it.account.name } }
     val categoryNames = remember(categories) { categories.associate { it.id to it.name } }
@@ -115,7 +117,7 @@ fun TransactionsScreen(onEdit: (Long) -> Unit, onAddAccount: () -> Unit) {
             OutlinedTextField(
                 value = query,
                 onValueChange = { query = it },
-                placeholder = { Text("Umsätze durchsuchen") },
+                placeholder = { Text("Suchen · lange drücken ändert die Kategorie") },
                 leadingIcon = { Icon(Icons.Filled.Search, contentDescription = null) },
                 trailingIcon = {
                     if (query.isNotEmpty()) {
@@ -150,11 +152,16 @@ fun TransactionsScreen(onEdit: (Long) -> Unit, onAddAccount: () -> Unit) {
                                     accountNames[tx.accountId],
                                 ).joinToString(" · "),
                                 onClick = { onEdit(tx.id) },
+                                onLongClick = { pickingId = tx.id },
                             )
                         }
                     }
                 }
             }
+        }
+        val picking = all.firstOrNull { it.id == pickingId }
+        if (picking != null) {
+            CategoryPickerDialog(tx = picking, categories = categories, onDismiss = { pickingId = null }, onEditDetails = { onEdit(picking.id) })
         }
     }
 }
@@ -184,11 +191,18 @@ fun TransactionRow(
     subtitle: String,
     onClick: (() -> Unit)? = null,
     horizontalPadding: Dp = 16.dp,
+    onLongClick: (() -> Unit)? = null,
 ) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .then(if (onClick != null) Modifier.clickable(onClick = onClick) else Modifier)
+            .then(
+                if (onClick != null) {
+                    Modifier.combinedClickable(onClick = onClick, onLongClick = onLongClick, onLongClickLabel = "Kategorie ändern")
+                } else {
+                    Modifier
+                },
+            )
             .padding(horizontal = horizontalPadding, vertical = 10.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {

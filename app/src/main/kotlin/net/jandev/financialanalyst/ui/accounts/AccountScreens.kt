@@ -24,6 +24,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -58,6 +59,7 @@ import net.jandev.financialanalyst.ui.common.toPercentText
 fun AccountsScreen(onBack: () -> Unit, onEdit: (Long) -> Unit) {
     val app = LocalApp.current
     val accounts by app.repository.accounts.collectAsStateWithLifecycle(initialValue = null)
+    var showEmpty by rememberSaveable { mutableStateOf(false) }
 
     Screen(
         title = "Konten",
@@ -83,8 +85,22 @@ fun AccountsScreen(onBack: () -> Unit, onEdit: (Long) -> Unit) {
                 contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 8.dp, bottom = 96.dp),
                 verticalArrangement = Arrangement.spacedBy(8.dp),
             ) {
-                items(list, key = { it.account.id }) { item ->
+                val empty = list.count { it.balanceCents == 0L }
+                items(if (showEmpty) list else list.filter { it.balanceCents != 0L }, key = { it.account.id }) { item ->
                     AccountCard(item, onClick = { onEdit(item.account.id) })
+                }
+                if (empty > 0) {
+                    item(key = "empty-toggle") {
+                        TextButton(onClick = { showEmpty = !showEmpty }) {
+                            Text(
+                                when {
+                                    showEmpty -> "Konten mit 0 € ausblenden"
+                                    empty == 1 -> "1 Konto mit 0 € anzeigen"
+                                    else -> "$empty Konten mit 0 € anzeigen"
+                                },
+                            )
+                        }
+                    }
                 }
             }
         }

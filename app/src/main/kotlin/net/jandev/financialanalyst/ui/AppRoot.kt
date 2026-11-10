@@ -41,6 +41,7 @@ import net.jandev.financialanalyst.ui.loans.OverdraftScreen
 import net.jandev.financialanalyst.ui.more.MoreEntry
 import net.jandev.financialanalyst.ui.more.MoreScreen
 import net.jandev.financialanalyst.ui.overview.OverviewScreen
+import net.jandev.financialanalyst.ui.analysis.CategoryTransactionsScreen
 import net.jandev.financialanalyst.ui.planning.BudgetsScreen
 import net.jandev.financialanalyst.ui.planning.GoalsScreen
 import net.jandev.financialanalyst.ui.recurring.RecurringEditScreen
@@ -143,7 +144,32 @@ fun AppRoot() {
                     onAddAccount = { nav.navigate(Routes.accountEdit(0)) },
                 )
             }
-            composable(TopLevel.Analysis.route) { AnalysisScreen() }
+            composable(TopLevel.Analysis.route) {
+                AnalysisScreen(
+                    onOpenCategory = { id, from, to, expense ->
+                        nav.navigate("category/$id/${from.toEpochDay()}/${to.toEpochDay()}/$expense")
+                    },
+                )
+            }
+            composable(
+                "category/{id}/{from}/{to}/{expense}",
+                arguments = listOf(
+                    navArgument("id") { type = NavType.LongType },
+                    navArgument("from") { type = NavType.LongType },
+                    navArgument("to") { type = NavType.LongType },
+                    navArgument("expense") { type = NavType.BoolType },
+                ),
+            ) { entry ->
+                val args = entry.arguments
+                CategoryTransactionsScreen(
+                    categoryId = args?.getLong("id") ?: 0,
+                    from = java.time.LocalDate.ofEpochDay(args?.getLong("from") ?: 0),
+                    to = java.time.LocalDate.ofEpochDay(args?.getLong("to") ?: 0),
+                    expense = args?.getBoolean("expense") ?: true,
+                    onBack = { nav.popBackStack() },
+                    onEdit = { nav.navigate(Routes.transactionEdit(it)) },
+                )
+            }
             composable(TopLevel.Recurring.route) {
                 RecurringScreen(onEdit = { nav.navigate(Routes.recurringEdit(it)) })
             }

@@ -86,6 +86,9 @@ und berücksichtigt:
 - Käufe über PayPal stehen bei PayPal und noch einmal als Abbuchung auf dem Bankkonto. Die Bankseite zählt als
   Umbuchung, wenn sich der passende PayPal-Umsatz findet.
 - Unterkonten (N26 Spaces) kommen als eigene Konten ohne IBAN.
+- Die ganze Historie geben Banken nur etwa eine Stunde nach der Freigabe heraus, danach meist 90 Tage. Die App holt
+  deshalb direkt nach dem Verbinden alles ohne Datumsgrenze; für ältere Umsätze die Bank erneut verbinden.
+- American Express ist bei Enable Banking für Deutschland nicht gelistet (Stand November 2026) und bleibt beim Datei-Import.
 
 Im Testbuild lässt sich ein Abruf per adb anstoßen, ohne die App-Sperre zu öffnen; das Log `BankDiag` nennt dabei je
 Konto, welche Felder die Bank liefert (nur Feldnamen und Anzahl, keine Inhalte):
@@ -109,4 +112,3 @@ Echte Kontoauszüge, Schlüsseldateien und Exporte gehören nicht ins Repo (`.gi
 - Automatischer Abruf für Trade Republic, falls dort kein PSD2-Zugang verfügbar ist.
 - Datenbank-Migrationen: Das Schema steht noch auf Version 1 und die App ist inzwischen mit echten Daten im Einsatz;
   jede Schemaänderung braucht ab jetzt eine Migration.
-- Kredite rechnen nach Plan ab dem Datum der ersten Rate; ein Abgleich mit den tatsächlich gebuchten Raten fehlt.

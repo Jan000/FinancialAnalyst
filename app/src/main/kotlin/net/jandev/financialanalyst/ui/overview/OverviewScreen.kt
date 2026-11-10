@@ -18,9 +18,15 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
+import net.jandev.financialanalyst.data.AccountForecast
 import net.jandev.financialanalyst.data.BudgetCalculator
+import net.jandev.financialanalyst.data.ForecastCalculator
 import net.jandev.financialanalyst.data.Settings
 import net.jandev.financialanalyst.domain.BudgetResult
+import net.jandev.financialanalyst.domain.CategoryKind
 import net.jandev.financialanalyst.domain.Money
 import net.jandev.financialanalyst.domain.NetWorth
 import net.jandev.financialanalyst.ui.common.TrendLine
@@ -124,8 +130,18 @@ fun OverviewScreen(
                     )
                 }
             }
+            val forecasts = remember(today, list, transactions, recurring, categories) {
+                val transferIds = categories.filter { it.kind == CategoryKind.TRANSFER }.map { it.id }.toSet()
+                ForecastCalculator.compute(today, list, transactions, recurring, transferIds)
+                    .filter { it.account.balanceCents != 0L || it.forecast.endBalanceCents != 0L }
+            }
+            if (forecasts.isNotEmpty()) {
+                MonthEndCard(forecasts)
+            }
             SectionCard(title = "Konten") {
-                list.forEach { item ->
+                var showEmpty by rememberSaveable { mutableStateOf(false) }
+                val empty = list.count { it.balanceCents == 0L }
+                (if (showEmpty) list else list.filter { it.balanceCents != 0L }).forEach { item ->
                     LabeledRow(label = item.account.name) {
                         AmountText(
                             item.balanceCents,
@@ -135,8 +151,13 @@ fun OverviewScreen(
                         )
                     }
                 }
-                TextButton(onClick = onOpenAccounts, modifier = Modifier.align(Alignment.End)) {
-                    Text("Konten verwalten")
+                Row(modifier = Modifier.align(Alignment.End)) {
+                    if (empty > 0) {
+                        TextButton(onClick = { showEmpty = !showEmpty }) {
+                            Text(if (showEmpty) "0-€-Konten ausblenden" else "$empty mit 0 € anzeigen")
+                        }
+                    }
+                    TextButton(onClick = onOpenAccounts) { Text("Konten verwalten") }
                 }
             }
             if (transactions.isNotEmpty()) {
@@ -158,6 +179,57 @@ fun OverviewScreen(
                 }
             }
         }
+    }
+}
+
+/** Je Konto der hochgerechnete Stand am Monatsende, mit Herleitung und den auflaufenden Dispozinsen. */
+@Composable
+private fun MonthEndCard(forecasts: List<AccountForecast>) {
+    val finance = LocalFinanceColors.current
+    val end = forecasts.first().forecast.monthEnd
+    SectionCard(title = "Voraussichtlich am ${end.dayMonthLabel()}") {
+        forecasts.forEachIndexed { index, item ->
+            val f = item.forecast
+            if (index > 0) HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+            LabeledRow(item.account.account.name) {
+                AmountText(f.endBalanceCents, withSign = false, colored = f.endBalanceCents < 0, negativeIsAlarming = true)
+            }
+            Text(
+                buildList {
+                    add("heute ${Money.format(item.account.balanceCents)}")
+                    if (f.fixedExpenseCents != 0L) add("Fixkosten ${Money.format(f.fixedExpenseCents, withSign = true)}")
+                    if (f.expectedIncomeCents != 0L) add("Einnahmen ${Money.format(f.expectedIncomeCents, withSign = true)}")
+                    if (f.otherCents != 0L) add("Übriges ${Money.format(f.otherCents, withSign = true)}")
+                }.joinToString(" · "),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            when {
+                f.interestMonthCents > 0 -> Text(
+                    "Dispozinsen in diesem Monat ca. ${Money.format(f.interestMonthCents)} (bis heute ${Money.format(f.interestSoFarCents)})",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = finance.expense,
+                )
+                f.lowestBalanceCents < 0 && item.account.account.overdraftRatePercent == 0.0 -> Text(
+                    "Im Minus – trage beim Konto den Dispozins ein, um die Zinsen zu sehen.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            if (f.lowestBalanceCents < 0 && f.lowestBalanceCents < f.endBalanceCents && f.lowestBalanceCents < item.account.balanceCents) {
+                Text(
+                    "Tiefster Stand ${Money.format(f.lowestBalanceCents)} am ${f.lowestDate.dayMonthLabel()}",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        }
+        Text(
+            "Fixkosten und Einnahmen stammen aus den Dauerposten und regelmäßigen Umbuchungen des Kontos. „Übriges“ ist der Tagesdurchschnitt aller " +
+                "anderen Bewegungen der letzten 90 Tage, hochgerechnet auf die restlichen Tage.",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
     }
 }
 

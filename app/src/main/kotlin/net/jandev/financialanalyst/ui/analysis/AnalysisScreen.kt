@@ -47,6 +47,7 @@ import net.jandev.financialanalyst.ui.common.SectionCard
 import net.jandev.financialanalyst.ui.common.ShareBar
 import net.jandev.financialanalyst.ui.theme.LocalFinanceColors
 import java.time.LocalDate
+import androidx.compose.foundation.clickable
 import kotlin.math.abs
 import kotlin.math.roundToInt
 
@@ -59,7 +60,7 @@ private fun historyLength(period: Period) = when (period) {
 }
 
 @Composable
-fun AnalysisScreen() {
+fun AnalysisScreen(onOpenCategory: (categoryId: Long, from: LocalDate, to: LocalDate, expense: Boolean) -> Unit) {
     val app = LocalApp.current
     val transactions by app.repository.transactions.collectAsStateWithLifecycle(initialValue = null)
     val categories by app.repository.categories.collectAsStateWithLifecycle(initialValue = emptyList())
@@ -186,12 +187,16 @@ fun AnalysisScreen() {
 
             if (summary.expensesByCategory.isNotEmpty()) {
                 SectionCard(title = "Ausgaben nach Kategorie") {
-                    CategoryList(summary.expensesByCategory, summary.expenseCents, names, LocalFinanceColors.current.chartExpense)
+                    CategoryList(summary.expensesByCategory, summary.expenseCents, names, LocalFinanceColors.current.chartExpense) {
+                        onOpenCategory(it ?: 0, summary.range.start, summary.range.endInclusive, true)
+                    }
                 }
             }
             if (summary.incomeByCategory.isNotEmpty()) {
                 SectionCard(title = "Einnahmen nach Kategorie") {
-                    CategoryList(summary.incomeByCategory, summary.incomeCents, names, LocalFinanceColors.current.chartIncome)
+                    CategoryList(summary.incomeByCategory, summary.incomeCents, names, LocalFinanceColors.current.chartIncome) {
+                        onOpenCategory(it ?: 0, summary.range.start, summary.range.endInclusive, false)
+                    }
                 }
             }
             if (summary.topMerchants.isNotEmpty()) {
@@ -231,10 +236,14 @@ private fun CategoryList(
     sumCents: Long,
     names: Map<Long, String>,
     color: androidx.compose.ui.graphics.Color,
+    onOpen: (Long?) -> Unit,
 ) {
     val max = totals.maxOf { it.cents }.coerceAtLeast(1)
     totals.filter { it.cents > 0 }.forEach { total ->
-        Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        Column(
+            modifier = Modifier.clickable(onClickLabel = "Umsätze anzeigen") { onOpen(total.categoryId) }.padding(vertical = 4.dp),
+            verticalArrangement = Arrangement.spacedBy(4.dp),
+        ) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(
                     names[total.categoryId] ?: "Ohne Kategorie",
