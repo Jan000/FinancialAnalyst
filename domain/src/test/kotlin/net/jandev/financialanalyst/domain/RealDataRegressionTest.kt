@@ -81,3 +81,26 @@ class RealDataRegressionTest {
         assertEquals(listOf(1L to 2L), TransferDetector.detect(accounts, candidates))
     }
 }
+
+class PayPalTextTest {
+    @Test
+    fun readsTheMerchantFromThePurpose() {
+        assertEquals(
+            "Beispielnetz (PayPal)",
+            PayPalText.merchant("PayPal Europe S.a.r.l. et Cie S.C.A", "1050148826527/. Beispielnetz, Ihr Einkauf bei Beispielnetz"),
+        )
+        assertEquals(
+            "Laden GmbH (PayPal)",
+            PayPalText.merchant("PayPal Europe S.a.r.l. et Cie S.C.A", ". Laden GmbH, Ihr Einkauf bei Laden GmbH/ABBUCHUNG VOM PAYPAL-KONTO"),
+        )
+        assertNull(PayPalText.merchant("PayPal Europe S.a.r.l. et Cie S.C.A", "1048327967161/PP.9070.PP/. , Ihr Einkauf bei"))
+        assertNull(PayPalText.merchant("Laden GmbH", "Ihr Einkauf bei Laden"))
+    }
+
+    @Test
+    fun recognisesPayoutsOfTheBalance() {
+        assertEquals(true, PayPalText.isPayout("PAYPAL", "INSTANT TRANSFER", 5000))
+        assertEquals(false, PayPalText.isPayout("PAYPAL", "INSTANT TRANSFER", -5000))
+        assertEquals(false, PayPalText.isPayout("Laden (PayPal)", "Erstattung", 500))
+    }
+}

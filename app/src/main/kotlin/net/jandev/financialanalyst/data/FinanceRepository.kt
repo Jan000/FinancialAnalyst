@@ -20,6 +20,7 @@ import net.jandev.financialanalyst.domain.CategoryRule
 import net.jandev.financialanalyst.domain.Categorizer
 import net.jandev.financialanalyst.domain.DefaultCategories
 import net.jandev.financialanalyst.domain.OwnAccount
+import net.jandev.financialanalyst.domain.PayPalText
 import net.jandev.financialanalyst.domain.TransferCandidate
 import net.jandev.financialanalyst.domain.TransferDetector
 import net.jandev.financialanalyst.domain.Tx
@@ -34,7 +35,11 @@ import net.jandev.financialanalyst.domain.csv.ImportedTx
 import java.time.LocalDate
 
 /** Zentrale Zugriffsschicht auf Konten, Umsätze und Kategorien. */
-class FinanceRepository(private val db: AppDatabase) {
+class FinanceRepository(
+    private val db: AppDatabase,
+    /** Namen der Kontoinhaber verbundener Konten; Überweisungen an sie sind Umbuchungen. */
+    private val ownNames: () -> Set<String> = { emptySet() },
+) {
 
     val accounts: Flow<List<AccountWithBalance>> = db.accounts().observeWithBalance()
     val transactions: Flow<List<TransactionEntity>> = db.transactions().observeAll()
@@ -118,8 +123,12 @@ class FinanceRepository(private val db: AppDatabase) {
                 kinds[rule.categoryId]?.let { CategoryRule(rule.pattern, rule.categoryId, it, rule.userDefined) }
             },
         )
-        val all = db.transactions().all()
         val changed = HashMap<Long, TransactionEntity>()
+        val all = db.transactions().all().map { tx ->
+            // PayPal-Abbuchungen nennen den Händler nur im Verwendungszweck: als Gegenpartei übernehmen.
+            val merchant = PayPalText.merchant(tx.counterparty, tx.purpose) ?: return@map tx
+            tx.copy(counterparty = merchant).also { changed[it.id] = it }
+        }
 
         for (tx in all) {
             if (tx.categoryId != null || tx.categoryLocked) continue
@@ -169,6 +178,19 @@ class FinanceRepository(private val db: AppDatabase) {
                     transferPeerId = walletId,
                     categoryId = if (tx.categoryLocked) tx.categoryId else transferCategory ?: tx.categoryId,
                 )
+            }
+        }
+        // Ohne passendes Gegenstück trotzdem Umbuchung: Überweisungen an den eigenen Namen (auf ein Konto,
+        // das die App nicht kennt) und Auszahlungen des PayPal-Guthabens.
+        val holders = ownNames().map { Categorizer.merchantKey(it) }.filter { it.length >= 5 }.toSet()
+        if (transferCategory != null) {
+            for (original in all) {
+                val tx = changed[original.id] ?: original
+                if (tx.transferPeerId != null || tx.categoryLocked || tx.categoryId == transferCategory) continue
+                val own = Categorizer.merchantKey(tx.counterparty) in holders
+                val payout = wallets.isNotEmpty() && tx.accountId !in wallets &&
+                    PayPalText.isPayout(tx.counterparty, tx.purpose, tx.amountCents)
+                if (own || payout) changed[tx.id] = tx.copy(categoryId = transferCategory)
             }
         }
         if (changed.isNotEmpty()) db.transactions().updateAll(changed.values.toList())

@@ -14,6 +14,14 @@ class DebugSyncReceiver : BroadcastReceiver() {
         val pending = goAsync()
         container.appScope.launch {
             try {
+                // --es find "american" listet stattdessen die bei Enable Banking gelisteten Banken mit diesem Namensteil.
+                val find = intent.getStringExtra("find")
+                if (find != null) {
+                    val banks = container.bankSync.banks(intent.getStringExtra("country") ?: "DE")
+                    val hits = banks.filter { it.name.contains(find, ignoreCase = true) }.map { it.name }
+                    Log.d("BankDiag", "Banken (${banks.size} gesamt) mit „$find“: $hits")
+                    return@launch
+                }
                 val report = container.bankSync.syncAll()
                 container.lastSyncReport.value = report
                 Log.d("BankDiag", "Abruf fertig: ${report.accounts} Konten, ${report.newTransactions} neue Umsätze, Fehler ${report.errors}")

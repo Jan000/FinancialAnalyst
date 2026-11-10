@@ -107,3 +107,23 @@ object TransferDetector {
         return account.hints.any { it.length >= 3 && text.contains(it) }
     }
 }
+
+/** Liest aus den Bankbuchungen von PayPal heraus, was dahintersteckt. */
+object PayPalText {
+    private val purchase = Regex("ihr einkauf bei\\s+(.+?)\\s*(/|$)", RegexOption.IGNORE_CASE)
+
+    /**
+     * PayPal bucht Käufe als „PayPal Europe S.a.r.l." ab und nennt den Händler nur im Verwendungszweck
+     * („…, Ihr Einkauf bei Händler"). Liefert dafür „Händler (PayPal)", sonst `null`.
+     */
+    fun merchant(counterparty: String, purpose: String): String? {
+        if (!counterparty.trim().startsWith("paypal europe", ignoreCase = true)) return null
+        val name = purchase.find(purpose)?.groupValues?.get(1)?.trim().orEmpty()
+        return if (name.length >= 2) "$name (PayPal)" else null
+    }
+
+    /** Auszahlung des PayPal-Guthabens aufs Bankkonto: Geld, das nur den Ort wechselt. */
+    fun isPayout(counterparty: String, purpose: String, amountCents: Long): Boolean =
+        amountCents > 0 && counterparty.trim().equals("paypal", ignoreCase = true) ||
+            amountCents > 0 && counterparty.contains("paypal", ignoreCase = true) && purpose.contains("instant transfer", ignoreCase = true)
+}

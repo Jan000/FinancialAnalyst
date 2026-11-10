@@ -20,10 +20,11 @@ import net.jandev.financialanalyst.data.notifications.NotificationMapping
 class AppContainer(context: Context) {
     val appScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     val db: AppDatabase = AppDatabase.open(context)
-    val repository = FinanceRepository(db)
+    private val bankCredentials = BankCredentials(context)
+    val repository = FinanceRepository(db, ownNames = { bankCredentials.holderNames() })
     val settings = SettingsStore(context)
     val bankSync = BankSync(
-        db, repository, BankCredentials(context),
+        db, repository, bankCredentials,
         afterChange = { afterTransactionsChanged() },
         diagnostics = context.applicationInfo.flags and android.content.pm.ApplicationInfo.FLAG_DEBUGGABLE != 0,
     )

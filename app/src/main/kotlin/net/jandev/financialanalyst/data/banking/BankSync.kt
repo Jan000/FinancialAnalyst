@@ -26,6 +26,7 @@ import net.jandev.financialanalyst.data.db.BankSessionEntity
 import net.jandev.financialanalyst.domain.AccountType
 import net.jandev.financialanalyst.domain.ConnectorType
 import net.jandev.financialanalyst.domain.Money
+import net.jandev.financialanalyst.domain.PayPalText
 import net.jandev.financialanalyst.domain.TxSource
 import net.jandev.financialanalyst.domain.csv.CsvImporter
 import net.jandev.financialanalyst.domain.csv.ImportedTx
@@ -111,6 +112,7 @@ class BankSync(
                 createdAt = Instant.now().epochSecond,
             ),
         )
+        credentials.addHolderNames(session.accounts.mapNotNull { it.name })
         val existing = db.accounts().all()
         for (remote in session.accounts) {
             val uid = remote.uid ?: continue
@@ -125,6 +127,8 @@ class BankSync(
                         externalHash = remote.identificationHash,
                         sessionId = sessionRowId,
                         iban = match.iban.ifBlank { iban },
+                        // Kurz nach der Freigabe gibt die Bank die ganze Historie heraus: noch einmal alles holen.
+                        lastSync = null,
                     ),
                 )
             } else {
@@ -198,6 +202,14 @@ class BankSync(
         val now = Instant.now().epochSecond
         val sessions = db.bankSessions().all().associateBy { it.id }
         val accounts = db.accounts().all().filter { it.connector == ConnectorType.ENABLE_BANKING && it.externalId != null }
+        if (!credentials.onceDone(ONCE_HOLDER_NAMES)) {
+            // Für Verbindungen aus früheren Versionen die Inhabernamen nachholen (an ihnen hängen Umbuchungen).
+            val names = accounts.groupBy { it.sessionId }.values.mapNotNull { group ->
+                runCatching { api.accountDetails(group.last().externalId!!).name }.getOrNull()
+            }
+            credentials.addHolderNames(names)
+            if (names.isNotEmpty() || accounts.isEmpty()) credentials.markDone(ONCE_HOLDER_NAMES)
+        }
         var inserted = 0
         var synced = 0
         var needsReconnect = false
@@ -230,14 +242,15 @@ class BankSync(
         val today = LocalDate.now()
         val firstSync = account.lastSync == null
         val from = if (firstSync) {
-            today.minusYears(1)
+            // Keine Untergrenze: die Bank liefert dann so weit zurück, wie sie kann.
+            null
         } else {
             // Großzügig überlappen: Buchungen tauchen bei manchen Banken rückdatiert auf.
             Instant.ofEpochSecond(account.lastSync).atZone(ZoneOffset.UTC).toLocalDate().minusDays(14)
         }
         val fields = java.util.TreeMap<String, Int>()
         val remote = api.transactions(
-            uid, from.toString(), longest = firstSync,
+            uid, from?.toString(), longest = firstSync,
             inspect = if (diagnostics) { text -> runCatching { countFields(Json.parseToJsonElement(text), "", fields) } } else null,
         )
         if (diagnostics) Log.d("BankDiag", "${account.institution} #${account.id}: ${remote.size} Umsätze, Felder $fields")
@@ -267,7 +280,8 @@ class BankSync(
                 date = date,
                 valueDate = tx.valueDate?.let(CsvImporter::parseDate),
                 amountCents = amount,
-                counterparty = counterparty.trim(),
+                // Die Kennung oben hängt bewusst am Rohtext, damit sie über Versionen hinweg gleich bleibt.
+                counterparty = PayPalText.merchant(counterparty, purpose) ?: counterparty.trim(),
                 purpose = purpose,
                 externalId = externalId,
             )
@@ -300,6 +314,7 @@ class BankSync(
     companion object {
         private const val WORK_NAME = "bank-sync"
         private const val ONCE_ACCOUNT_NAMES = "account_names_v2"
+        private const val ONCE_HOLDER_NAMES = "holder_names_v1"
 
         /** Dreimal täglich im Hintergrund abrufen – Banken erlauben meist vier Abrufe ohne den Nutzer. */
         fun schedule(context: Context) {

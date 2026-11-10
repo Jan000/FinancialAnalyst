@@ -61,6 +61,14 @@ class BankCredentials(context: Context) {
         state.value = read()
     }
 
+    /** Namen der Kontoinhaber, wie die Banken sie melden. */
+    fun holderNames(): Set<String> = prefs.getStringSet(KEY_HOLDERS, emptySet()).orEmpty().toSet()
+
+    fun addHolderNames(names: Collection<String>) {
+        val cleaned = names.map { it.trim() }.filter { it.length >= 5 }
+        if (cleaned.isNotEmpty()) prefs.edit().putStringSet(KEY_HOLDERS, holderNames() + cleaned).apply()
+    }
+
     /** Merker für einmalige Nacharbeiten an den abgerufenen Daten. */
     fun onceDone(name: String): Boolean = prefs.getBoolean("once_$name", false)
 
@@ -124,6 +132,7 @@ class BankCredentials(context: Context) {
         private const val KEY_PEM = "pem"
         private const val KEY_IV = "pem_iv"
         private const val KEY_PENDING = "pending_auth"
+        private const val KEY_HOLDERS = "holder_names"
         private const val KEYSTORE_ALIAS = "enable_banking_key_wrap"
         private const val TRANSFORMATION = "AES/GCM/NoPadding"
     }

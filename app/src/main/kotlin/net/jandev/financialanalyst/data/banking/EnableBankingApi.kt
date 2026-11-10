@@ -195,12 +195,16 @@ class EnableBankingApi(
         call<ApiError>("/sessions/$sessionId", method = "DELETE")
     }
 
+    /** Stammdaten eines Kontos; `name` ist der Kontoinhaber. */
+    suspend fun accountDetails(accountUid: String): BankAccount = call("/accounts/$accountUid/details")
+
     suspend fun balances(accountUid: String): List<Balance> = call<BalanceList>("/accounts/$accountUid/balances").balances
 
     /** Lädt alle Seiten. [longest] holt beim ersten Abruf so viel Historie, wie die Bank hergibt. */
     suspend fun transactions(
         accountUid: String,
-        dateFrom: String,
+        /** Ohne Angabe und mit [longest] liefert die Bank alles, was sie hergibt. */
+        dateFrom: String?,
         longest: Boolean,
         /** Bekommt jede Antwortseite unverändert, für die Diagnose der gelieferten Felder. */
         inspect: ((String) -> Unit)? = null,
