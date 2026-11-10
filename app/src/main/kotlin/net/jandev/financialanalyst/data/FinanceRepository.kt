@@ -2,9 +2,12 @@ package net.jandev.financialanalyst.data
 
 import androidx.room.withTransaction
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.combine
 import net.jandev.financialanalyst.data.db.AccountEntity
 import net.jandev.financialanalyst.data.db.AccountWithBalance
 import net.jandev.financialanalyst.data.db.AppDatabase
+import net.jandev.financialanalyst.data.db.AutoRuleConditionEntity
+import net.jandev.financialanalyst.data.db.AutoRuleEntity
 import net.jandev.financialanalyst.data.db.BankSessionEntity
 import net.jandev.financialanalyst.data.db.BudgetEntity
 import net.jandev.financialanalyst.data.db.SavingsGoalEntity
@@ -17,6 +20,9 @@ import net.jandev.financialanalyst.data.db.LoanRateChangeEntity
 import net.jandev.financialanalyst.data.db.RecurringEntity
 import net.jandev.financialanalyst.data.db.TransactionEntity
 import net.jandev.financialanalyst.domain.AccountType
+import net.jandev.financialanalyst.domain.AutoRule
+import net.jandev.financialanalyst.domain.RuleCondition
+import net.jandev.financialanalyst.domain.RuleMatcher
 import net.jandev.financialanalyst.domain.CategoryKind
 import net.jandev.financialanalyst.domain.CategoryRule
 import net.jandev.financialanalyst.domain.Categorizer
@@ -124,6 +130,8 @@ class FinanceRepository(
             db.categories().rules().mapNotNull { rule ->
                 kinds[rule.categoryId]?.let { CategoryRule(rule.pattern, rule.categoryId, it, rule.userDefined) }
             },
+            loadRules().filter { it.rule.enabled && it.rule.categoryId in kinds }
+                .map { AutoRule(it.rule.id, it.rule.categoryId, it.conditions) },
         )
         val changed = HashMap<Long, TransactionEntity>()
         val all = db.transactions().all().map { tx ->
@@ -198,30 +206,49 @@ class FinanceRepository(
         if (changed.isNotEmpty()) db.transactions().updateAll(changed.values.toList())
     }
 
-    /**
-     * Merkt sich eine von Hand gewählte Kategorie für „dieselbe Zahlung" (Händler, sonst Verwendungszweck,
-     * sonst Konto und Betrag): alle bisherigen gleichen Umsätze bekommen sie sofort, künftige beim Eingang,
-     * und ein passender Dauerposten übernimmt sie ebenfalls.
-     */
-    suspend fun learnCategory(tx: TransactionEntity, categoryId: Long) =
-        learnCategory(Categorizer.learnKey(tx.counterparty, tx.purpose, tx.accountId, tx.amountCents), categoryId, sign = null)
+    val rules: Flow<List<RuleWithConditions>> =
+        combine(db.rules().observeRules(), db.rules().observeConditions()) { rules, conditions -> join(rules, conditions) }
 
-    /** [sign] beschränkt die Übernahme auf Ausgänge (−1) oder Eingänge (+1). */
-    private suspend fun learnCategory(key: String, categoryId: Long, sign: Int?) = db.withTransaction {
-        db.categories().deleteUserRule(key)
-        db.categories().insertRules(listOf(CategoryRuleEntity(pattern = key, categoryId = categoryId, userDefined = true)))
-        val affected = db.transactions().all().filter {
-            !it.categoryLocked && it.categoryId != categoryId && it.transferPeerId == null &&
-                (sign == null || (it.amountCents < 0) == (sign < 0)) &&
-                Categorizer.learnKey(it.counterparty, it.purpose, it.accountId, it.amountCents) == key
+    private fun join(rules: List<AutoRuleEntity>, conditions: List<AutoRuleConditionEntity>): List<RuleWithConditions> {
+        val byRule = conditions.groupBy { it.ruleId }
+        return rules.map { rule ->
+            RuleWithConditions(rule, byRule[rule.id].orEmpty().map { RuleCondition(it.field, it.op, it.value) })
         }
-        if (affected.isNotEmpty()) db.transactions().updateAll(affected.map { it.copy(categoryId = categoryId) })
-        val items = db.recurring().all().filter {
-            it.categoryId != categoryId && it.matchKey.substringBeforeLast('|') == key &&
-                (sign == null || it.matchKey.endsWith(if (sign < 0) "|-" else "|+"))
-        }
-        if (items.isNotEmpty()) db.recurring().updateAll(items.map { it.copy(categoryId = categoryId) })
     }
+
+    private suspend fun loadRules(): List<RuleWithConditions> = join(db.rules().rules(), db.rules().conditions())
+
+    suspend fun rule(id: Long): RuleWithConditions? = loadRules().firstOrNull { it.rule.id == id }
+
+    /** Speichert eine Regel; eine ältere mit genau denselben Bedingungen wird ersetzt. Liefert die ID. */
+    suspend fun saveRule(rule: AutoRuleEntity, conditions: List<RuleCondition>): Long = db.withTransaction {
+        val same = loadRules().filter { it.rule.id != rule.id && it.conditions.toSet() == conditions.toSet() }.map { it.rule.id }
+        if (same.isNotEmpty()) db.rules().deleteByIds(same)
+        val inserted = db.rules().upsert(rule)
+        val id = if (rule.id == 0L) inserted else rule.id
+        db.rules().deleteConditions(id)
+        db.rules().insertConditions(conditions.map { AutoRuleConditionEntity(ruleId = id, field = it.field, op = it.op, value = it.value) })
+        id
+    }
+
+    suspend fun deleteRule(rule: AutoRuleEntity) = db.rules().delete(rule)
+
+    /**
+     * Setzt die Kategorie der genannten Umsätze; Dauerposten dieser Zahlungen übernehmen sie.
+     * Umsätze in [keepOut] hat der Nutzer bewusst ausgenommen: ohne Kategorie bleiben sie von der Automatik verschont.
+     */
+    suspend fun applyCategory(transactionIds: Collection<Long>, categoryId: Long, keepOut: Collection<Long> = emptyList()) =
+        db.withTransaction {
+            val ids = transactionIds.toSet()
+            val out = keepOut.toSet()
+            val all = db.transactions().all()
+            val changed = all.filter { it.id in ids && it.categoryId != categoryId }.map { it.copy(categoryId = categoryId) }
+            val excluded = all.filter { it.id in out && it.categoryId == null && !it.categoryLocked }.map { it.copy(categoryLocked = true) }
+            if (changed.isNotEmpty() || excluded.isNotEmpty()) db.transactions().updateAll(changed + excluded)
+            val keys = all.filter { it.id in ids }.map { RecurringDetector.matchKey(it.toTx()) }.toSet()
+            val items = db.recurring().all().filter { it.matchKey in keys && it.categoryId != categoryId }
+            if (items.isNotEmpty()) db.recurring().updateAll(items.map { it.copy(categoryId = categoryId) })
+        }
 
     val groups: Flow<List<GroupEntity>> = db.groups().observeAll()
 
@@ -291,7 +318,10 @@ class FinanceRepository(
         val category = keyed.categoryId
         val key = keyed.matchKey.substringBeforeLast('|')
         if (category != null && key.isNotBlank()) {
-            learnCategory(key, category, sign = if (keyed.matchKey.endsWith("|-")) -1 else 1)
+            val conditions = RuleMatcher.fromLearnKey(key, sign = if (keyed.matchKey.endsWith("|-")) -1 else 1)
+            saveRule(AutoRuleEntity(name = keyed.name, categoryId = category), conditions)
+            val affected = db.transactions().all().filter { !it.categoryLocked }.matching(conditions, category)
+            applyCategory(affected.map { it.id }, category)
         }
         id
     }
@@ -460,5 +490,13 @@ fun TransactionEntity.toTx(): Tx = Tx(
     categoryId = categoryId,
     isTransfer = transferPeerId != null,
 )
+
+data class RuleWithConditions(val rule: AutoRuleEntity, val conditions: List<RuleCondition>)
+
+/** Umsätze, auf die die Bedingungen zutreffen und die noch nicht in [categoryId] liegen; erkannte Umbuchungen bleiben außen vor. */
+fun List<TransactionEntity>.matching(conditions: List<RuleCondition>, categoryId: Long?): List<TransactionEntity> = filter {
+    it.transferPeerId == null && it.categoryId != categoryId &&
+        RuleMatcher.matches(conditions, it.counterparty, it.purpose, it.amountCents, it.accountId)
+}
 
 data class ImportSummary(val inserted: Int, val confirmed: Int, val duplicates: Int)

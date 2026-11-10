@@ -10,6 +10,8 @@ import net.jandev.financialanalyst.domain.AccountType
 import net.jandev.financialanalyst.domain.CategoryKind
 import net.jandev.financialanalyst.domain.ConnectorType
 import net.jandev.financialanalyst.domain.RecurrenceInterval
+import net.jandev.financialanalyst.domain.RuleField
+import net.jandev.financialanalyst.domain.RuleOp
 import net.jandev.financialanalyst.domain.TxSource
 import net.jandev.financialanalyst.domain.TxStatus
 import java.time.LocalDate
@@ -116,6 +118,31 @@ data class CategoryRuleEntity(
     val categoryId: Long,
     /** Aus einer Nutzerkorrektur gelernt; hat Vorrang vor den mitgelieferten Regeln. */
     val userDefined: Boolean = false,
+)
+
+/** Regel des Nutzers: treffen alle ihre Bedingungen zu, bekommt ein Umsatz die Kategorie. */
+@Entity(tableName = "auto_rules")
+data class AutoRuleEntity(
+    @PrimaryKey(autoGenerate = true) val id: Long = 0,
+    /** Frei gewählter Name; leer = die Bedingungen dienen als Beschriftung. */
+    val name: String = "",
+    val categoryId: Long,
+    val enabled: Boolean = true,
+)
+
+@Entity(
+    tableName = "auto_rule_conditions",
+    foreignKeys = [
+        ForeignKey(entity = AutoRuleEntity::class, parentColumns = ["id"], childColumns = ["ruleId"], onDelete = ForeignKey.CASCADE),
+    ],
+    indices = [Index("ruleId")],
+)
+data class AutoRuleConditionEntity(
+    @PrimaryKey(autoGenerate = true) val id: Long = 0,
+    val ruleId: Long,
+    val field: RuleField,
+    val op: RuleOp,
+    val value: String,
 )
 
 @Entity(tableName = "recurring")

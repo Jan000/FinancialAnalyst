@@ -10,13 +10,18 @@ data class CategoryRule(
 )
 
 /** Ordnet Umsätze anhand von Schlagwörtern in Gegenpartei und Verwendungszweck einer Kategorie zu. */
-class Categorizer(rules: List<CategoryRule>) {
+class Categorizer(rules: List<CategoryRule>, autoRules: List<AutoRule> = emptyList()) {
+    // Regeln des Nutzers gehen vor: die mit den meisten Bedingungen zuerst, bei Gleichstand die neuere.
+    private val own = autoRules.sortedWith(compareByDescending<AutoRule> { it.conditions.size }.thenByDescending { it.id })
+
     // Nutzerregeln zuerst, sonst gewinnt das längste (spezifischste) Schlagwort.
     private val ordered = rules
         .filter { it.pattern.isNotBlank() }
         .sortedWith(compareByDescending<CategoryRule> { it.userDefined }.thenByDescending { it.pattern.length })
 
     fun categorize(counterparty: String, purpose: String, amountCents: Long, accountId: Long = 0): Long? {
+        own.firstOrNull { RuleMatcher.matches(it.conditions, counterparty, purpose, amountCents, accountId) }
+            ?.let { return it.categoryId }
         val text = normalize("$counterparty $purpose")
         val key = learnKey(counterparty, purpose, accountId, amountCents)
         val match = ordered.firstOrNull { rule ->

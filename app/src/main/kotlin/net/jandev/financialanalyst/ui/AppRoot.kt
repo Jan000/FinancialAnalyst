@@ -47,6 +47,8 @@ import net.jandev.financialanalyst.ui.groups.GroupsScreen
 import net.jandev.financialanalyst.ui.planning.BudgetsScreen
 import net.jandev.financialanalyst.ui.planning.GoalsScreen
 import net.jandev.financialanalyst.ui.recurring.RecurringEditScreen
+import net.jandev.financialanalyst.ui.rules.RuleEditScreen
+import net.jandev.financialanalyst.ui.rules.RulesScreen
 import net.jandev.financialanalyst.ui.recurring.RecurringScreen
 import net.jandev.financialanalyst.ui.settings.BackupScreen
 import net.jandev.financialanalyst.ui.settings.NotificationScreen
@@ -70,6 +72,7 @@ object Routes {
     const val LOANS = "loans"
     const val BUDGETS = "budgets"
     const val GROUPS = "groups"
+    const val RULES = "rules"
     const val GOALS = "goals"
     const val BACKUP = "backup"
     const val NOTIFICATIONS = "notifications"
@@ -145,6 +148,7 @@ fun AppRoot() {
                 TransactionsScreen(
                     onEdit = { nav.navigate(Routes.transactionEdit(it)) },
                     onAddAccount = { nav.navigate(Routes.accountEdit(0)) },
+                    onOpenRecurring = { nav.navigate(Routes.recurringEdit(it)) },
                 )
             }
             composable(TopLevel.Analysis.route) {
@@ -195,6 +199,12 @@ fun AppRoot() {
                     onEditTransaction = { nav.navigate(Routes.transactionEdit(it)) },
                 )
             }
+            composable(Routes.RULES) {
+                RulesScreen(onBack = { nav.popBackStack() }, onEdit = { nav.navigate("rule/$it") })
+            }
+            composable("rule/{id}", arguments = listOf(navArgument("id") { type = NavType.LongType })) { entry ->
+                RuleEditScreen(ruleId = entry.arguments?.getLong("id") ?: 0, onDone = { nav.popBackStack() })
+            }
             composable(Routes.BUDGETS) { BudgetsScreen(onBack = { nav.popBackStack() }) }
             composable(Routes.GOALS) { GoalsScreen(onBack = { nav.popBackStack() }) }
             composable(Routes.LOANS) {
@@ -217,6 +227,7 @@ fun AppRoot() {
                         MoreEntry("Bankverbindungen", "Umsätze automatisch direkt von der Bank abrufen") { nav.navigate(Routes.BANKS) },
                         MoreEntry("Zahlungen sofort erfassen", "Benachrichtigungen der Banking-Apps als vorläufige Umsätze mitlesen") { nav.navigate(Routes.NOTIFICATIONS) },
                         MoreEntry("Gruppen", "Umsätze eines Projekts oder Vorhabens zusammenfassen und den Saldo sehen") { nav.navigate(Routes.GROUPS) },
+                        MoreEntry("Regeln", "Umsätze nach eigenen Bedingungen automatisch kategorisieren") { nav.navigate(Routes.RULES) },
                         MoreEntry("Budgets", "Obergrenzen je Kategorie für den Budgetzeitraum") { nav.navigate(Routes.BUDGETS) },
                         MoreEntry("Sparziele", "Worauf du sparst und wie viel dafür monatlich nötig ist") { nav.navigate(Routes.GOALS) },
                         MoreEntry("Kredite", "Restschuld, Zinsen und Tilgungsplan laufender Kredite") { nav.navigate(Routes.LOANS) },

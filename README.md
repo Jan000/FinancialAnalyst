@@ -73,6 +73,16 @@ im versteckten App-Ordner von Drive (`drive.appdata`).
 Eine Client-ID muss nicht in die App eingetragen werden; Google ordnet sie über Paketname und Fingerabdruck zu.
 Ohne Google-Einrichtung funktioniert die Sicherung als Datei (**Datei speichern / Aus Datei laden**).
 
+## Kategorisieren, Regeln, Gruppen
+
+- **Kategorie ändern:** Umsatz lange drücken. Vor der Übernahme auf gleiche Zahlungen zeigt eine Vorschau, welche
+  Umsätze betroffen sind; einzelne lassen sich abwählen, die Auswahl lässt sich auf den gleichen Betrag einengen.
+- **Regeln** (Mehr → Regeln): eine oder mehrere Bedingungen (Gegenpartei, Verwendungszweck, Betrag, Art, Konto), die
+  alle zutreffen müssen. Neue Umsätze werden automatisch zugeordnet; „Speichern und Umsätze zuordnen" wendet eine
+  Regel nach Vorschau auf vorhandene Umsätze an. Eigene Regeln gehen den mitgelieferten Schlagwörtern vor.
+- **Gruppen** (Mehr → Gruppen): Umsätze eines Vorhabens zusammenfassen und den Saldo sehen.
+- Die Umsatzliste zeigt die erwarteten Buchungen der Dauerposten für die nächsten 31 Tage ausgegraut.
+
 ## Stand der Erprobung
 
 Im Emulator durchgespielt: Konten und Umsätze anlegen, CSV-Import, Analyse, Fixkosten, Budget, Kredite, Budgets je

@@ -69,11 +69,14 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import net.jandev.financialanalyst.data.db.GroupEntity
 import net.jandev.financialanalyst.ui.theme.LocalFinanceColors
+import androidx.compose.ui.draw.alpha
+import net.jandev.financialanalyst.domain.Budget
+import net.jandev.financialanalyst.domain.RecurringPlan
 import java.time.LocalDate
 import kotlin.math.abs
 
 @Composable
-fun TransactionsScreen(onEdit: (Long) -> Unit, onAddAccount: () -> Unit) {
+fun TransactionsScreen(onEdit: (Long) -> Unit, onAddAccount: () -> Unit, onOpenRecurring: (Long) -> Unit = {}) {
     val app = LocalApp.current
     val transactions by app.repository.transactions.collectAsStateWithLifecycle(initialValue = null)
     val accounts by app.repository.accounts.collectAsStateWithLifecycle(initialValue = emptyList())
@@ -87,6 +90,28 @@ fun TransactionsScreen(onEdit: (Long) -> Unit, onAddAccount: () -> Unit) {
     val palette = LocalFinanceColors.current.chart
     val categoryColors = remember(categories, palette) { categories.associate { it.id to palette[it.colorIndex.mod(palette.size)] } }
     val groupMarks = remember(groups, palette) { groups.associate { it.id to (it.name to palette[it.colorIndex.mod(palette.size)]) } }
+
+    val recurring by app.repository.recurring.collectAsStateWithLifecycle(initialValue = emptyList())
+    val today = remember { LocalDate.now() }
+    // Was die Dauerposten in den nächsten Wochen erwarten lassen: als Umsätze mit negativer ID, die es noch nicht gibt.
+    val planned = remember(recurring, today) {
+        val origin = HashMap<Long, Long>()
+        var nextId = -1L
+        val rows = recurring.filter { it.active && !it.dismissed }.flatMap { item ->
+            Budget.plannedFlows(listOf(RecurringPlan(item.name, item.amountCents, item.interval, item.nextDue)), today, today.plusDays(PLANNED_DAYS))
+                .map { flow ->
+                    TransactionEntity(
+                        id = nextId--,
+                        accountId = item.accountId ?: 0,
+                        bookingDate = flow.date,
+                        amountCents = flow.amountCents,
+                        counterparty = item.name,
+                        categoryId = item.categoryId,
+                    ).also { origin[it.id] = item.id }
+                }
+        }
+        rows to origin
+    }
 
     Screen(
         title = "Umsätze",
@@ -125,7 +150,15 @@ fun TransactionsScreen(onEdit: (Long) -> Unit, onAddAccount: () -> Unit) {
                 }
             }
         }
-        val grouped = remember(filtered) { filtered.groupBy { it.bookingDate }.toList() }
+        val grouped = remember(filtered, planned, query) {
+            val q = query.trim().lowercase()
+            val expected = planned.first.filter {
+                q.isEmpty() || it.counterparty.lowercase().contains(q) ||
+                    categoryNames[it.categoryId]?.lowercase()?.contains(q) == true ||
+                    Money.format(abs(it.amountCents)).contains(q)
+            }
+            (expected + filtered).groupBy { it.bookingDate }.toList().sortedByDescending { it.first }
+        }
 
         Column(Modifier.fillMaxSize().padding(padding)) {
             OutlinedTextField(
@@ -143,7 +176,7 @@ fun TransactionsScreen(onEdit: (Long) -> Unit, onAddAccount: () -> Unit) {
                 singleLine = true,
                 modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
             )
-            if (filtered.isEmpty()) {
+            if (grouped.isEmpty()) {
                 EmptyState(
                     title = if (all.isEmpty()) "Noch keine Umsätze" else "Keine Treffer",
                     hint = if (all.isEmpty()) {
@@ -156,17 +189,21 @@ fun TransactionsScreen(onEdit: (Long) -> Unit, onAddAccount: () -> Unit) {
                 LazyColumn(contentPadding = PaddingValues(bottom = 96.dp)) {
                     grouped.forEach { (date, items) ->
                         item(key = "h${date.toEpochDay()}") {
-                            DayHeader(date, items.sumOf { it.amountCents })
+                            // Bis heute zählt, was gebucht ist; an künftigen Tagen, was erwartet wird.
+                            DayHeader(date, items.filter { it.id > 0 || date > today }.sumOf { it.amountCents }, dimmed = date > today)
                         }
                         items(items, key = { it.id }) { tx ->
+                            val isPlanned = tx.id < 0
                             TransactionRow(
                                 tx = tx,
                                 subtitle = listOfNotNull(
+                                    "Geplant".takeIf { isPlanned },
                                     categoryNames[tx.categoryId] ?: "Ohne Kategorie",
                                     accountNames[tx.accountId],
                                 ).joinToString(" · "),
-                                onClick = { onEdit(tx.id) },
-                                onLongClick = { pickingId = tx.id },
+                                onClick = { if (isPlanned) planned.second[tx.id]?.let(onOpenRecurring) else onEdit(tx.id) },
+                                onLongClick = if (isPlanned) null else ({ pickingId = tx.id }),
+                                dimmed = isPlanned || tx.bookingDate > today,
                                 categoryColor = categoryColors[tx.categoryId] ?: MaterialTheme.colorScheme.outlineVariant,
                                 group = groupMarks[tx.groupId],
                             )
@@ -182,11 +219,16 @@ fun TransactionsScreen(onEdit: (Long) -> Unit, onAddAccount: () -> Unit) {
     }
 }
 
+/** So weit voraus zeigt die Umsatzliste erwartete Buchungen der Dauerposten. */
+private const val PLANNED_DAYS = 31L
+private const val FUTURE_ALPHA = 0.45f
+
 @Composable
-private fun DayHeader(date: LocalDate, sumCents: Long) {
+private fun DayHeader(date: LocalDate, sumCents: Long, dimmed: Boolean = false) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
+            .alpha(if (dimmed) FUTURE_ALPHA else 1f)
             .padding(start = 16.dp, end = 16.dp, top = 16.dp, bottom = 4.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
@@ -212,10 +254,13 @@ fun TransactionRow(
     categoryColor: Color? = null,
     /** Name und Farbe der Gruppe, zu der der Umsatz gehört. */
     group: Pair<String, Color>? = null,
+    /** Ausgegraut: Buchung liegt in der Zukunft oder ist erst geplant. */
+    dimmed: Boolean = false,
 ) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
+            .alpha(if (dimmed) FUTURE_ALPHA else 1f)
             .then(
                 if (onClick != null) {
                     Modifier.combinedClickable(onClick = onClick, onLongClick = onLongClick, onLongClickLabel = "Kategorie ändern")
@@ -286,6 +331,7 @@ fun TransactionEditScreen(transactionId: Long, onDone: () -> Unit) {
     var counterparty by rememberSaveable { mutableStateOf("") }
     var purpose by rememberSaveable { mutableStateOf("") }
     var confirmDelete by remember { mutableStateOf(false) }
+    var applying by remember { mutableStateOf<TransactionEntity?>(null) }
 
     LaunchedEffect(transactionId) {
         if (transactionId == 0L) return@LaunchedEffect
@@ -415,18 +461,23 @@ fun TransactionEditScreen(transactionId: Long, onDone: () -> Unit) {
                         categoryLocked = categoryId != null && (base.categoryLocked || categoryId != base.categoryId),
                     )
                     scope.launch {
-                        app.repository.saveTransaction(tx)
-                        val chosen = tx.categoryId
-                        if (chosen != null && chosen != base.categoryId) {
-                            app.repository.learnCategory(tx, chosen)
+                        val id = app.repository.saveTransaction(tx)
+                        if (tx.categoryId != null && tx.categoryId != base.categoryId) {
+                            // Gleiche Zahlungen bekommen die Kategorie erst nach einer Vorschau.
+                            applying = tx.copy(id = id)
+                        } else {
+                            app.afterTransactionsChanged()
+                            onDone()
                         }
-                        app.afterTransactionsChanged()
-                        onDone()
                     }
                 },
                 modifier = Modifier.fillMaxWidth(),
             ) { Text("Speichern") }
         }
+    }
+
+    applying?.let { saved ->
+        SimilarPaymentsDialog(tx = saved, categoryId = saved.categoryId ?: return@let, categories = categories, onDone = onDone)
     }
 
     if (confirmDelete) {

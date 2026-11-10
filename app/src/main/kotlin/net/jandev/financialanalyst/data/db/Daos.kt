@@ -130,8 +130,39 @@ interface CategoryDao {
     @Insert
     suspend fun insertRules(rules: List<CategoryRuleEntity>)
 
-    @Query("DELETE FROM category_rules WHERE userDefined = 1 AND pattern = :pattern")
-    suspend fun deleteUserRule(pattern: String)
+}
+
+@Dao
+interface RuleDao {
+    @Query("SELECT * FROM auto_rules ORDER BY id DESC")
+    fun observeRules(): Flow<List<AutoRuleEntity>>
+
+    @Query("SELECT * FROM auto_rule_conditions ORDER BY id")
+    fun observeConditions(): Flow<List<AutoRuleConditionEntity>>
+
+    @Query("SELECT * FROM auto_rules")
+    suspend fun rules(): List<AutoRuleEntity>
+
+    @Query("SELECT * FROM auto_rule_conditions ORDER BY id")
+    suspend fun conditions(): List<AutoRuleConditionEntity>
+
+    @Query("SELECT * FROM auto_rules WHERE id = :id")
+    suspend fun byId(id: Long): AutoRuleEntity?
+
+    @Upsert
+    suspend fun upsert(rule: AutoRuleEntity): Long
+
+    @Delete
+    suspend fun delete(rule: AutoRuleEntity)
+
+    @Query("DELETE FROM auto_rules WHERE id IN (:ids)")
+    suspend fun deleteByIds(ids: List<Long>)
+
+    @Insert
+    suspend fun insertConditions(conditions: List<AutoRuleConditionEntity>)
+
+    @Query("DELETE FROM auto_rule_conditions WHERE ruleId = :ruleId")
+    suspend fun deleteConditions(ruleId: Long)
 }
 
 @Dao

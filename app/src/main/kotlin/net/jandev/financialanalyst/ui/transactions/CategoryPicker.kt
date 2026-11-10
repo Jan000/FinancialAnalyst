@@ -35,8 +35,8 @@ import net.jandev.financialanalyst.ui.common.LocalApp
 import net.jandev.financialanalyst.ui.common.shortLabel
 
 /**
- * Kategorie eines Umsatzes mit einem Tipp ändern. Auf Wunsch (Voreinstellung) gilt die Wahl für alle
- * bisherigen und künftigen gleichen Zahlungen.
+ * Kategorie eines Umsatzes mit einem Tipp ändern. Auf Wunsch (Voreinstellung) zeigt danach eine Vorschau die
+ * gleichen Zahlungen, die dieselbe Kategorie bekommen sollen; einzelne lassen sich dort abwählen.
  */
 @Composable
 fun CategoryPickerDialog(
@@ -48,6 +48,11 @@ fun CategoryPickerDialog(
     val app = LocalApp.current
     val scope = rememberCoroutineScope()
     var applyToAll by remember { mutableStateOf(true) }
+    var applying by remember { mutableStateOf<Pair<TransactionEntity, Long>?>(null) }
+    applying?.let { (saved, categoryId) ->
+        SimilarPaymentsDialog(tx = saved, categoryId = categoryId, categories = categories, onDone = onDismiss)
+        return
+    }
     // Passende Art zuerst: bei einer Abbuchung die Ausgaben-Kategorien, bei einem Eingang die Einnahmen.
     val ordered = remember(categories, tx.amountCents) {
         val first = if (tx.amountCents < 0) CategoryKind.EXPENSE else CategoryKind.INCOME
@@ -81,10 +86,14 @@ fun CategoryPickerDialog(
                                 .fillMaxWidth()
                                 .clickable {
                                     scope.launch {
-                                        app.repository.saveTransaction(tx.copy(categoryId = category.id, categoryLocked = true))
-                                        if (applyToAll) app.repository.learnCategory(tx, category.id)
-                                        app.afterTransactionsChanged()
-                                        onDismiss()
+                                        val saved = tx.copy(categoryId = category.id, categoryLocked = true)
+                                        app.repository.saveTransaction(saved)
+                                        if (applyToAll) {
+                                            applying = saved to category.id
+                                        } else {
+                                            app.afterTransactionsChanged()
+                                            onDismiss()
+                                        }
                                     }
                                 }
                                 .padding(vertical = 12.dp),
@@ -103,7 +112,7 @@ fun CategoryPickerDialog(
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     Checkbox(checked = applyToAll, onCheckedChange = { applyToAll = it })
-                    Text("Für alle gleichen Zahlungen übernehmen", style = MaterialTheme.typography.bodyMedium)
+                    Text("Auch gleiche Zahlungen zuordnen (mit Vorschau)", style = MaterialTheme.typography.bodyMedium)
                 }
             }
         },
