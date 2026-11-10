@@ -32,6 +32,7 @@ import net.jandev.financialanalyst.ui.accounts.AccountsScreen
 import net.jandev.financialanalyst.ui.analysis.AnalysisScreen
 import androidx.compose.runtime.LaunchedEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import net.jandev.financialanalyst.ui.banking.BankScreen
 import net.jandev.financialanalyst.ui.common.LocalApp
 import net.jandev.financialanalyst.ui.importing.ImportScreen
 import net.jandev.financialanalyst.ui.loans.LoanDetailScreen
@@ -60,6 +61,7 @@ object Routes {
     const val IMPORT = "import"
     const val SETTINGS = "settings"
     const val LOANS = "loans"
+    const val BANKS = "banks"
     const val OVERDRAFT = "overdraft"
     fun loan(id: Long) = "loan/$id"
     fun recurringEdit(id: Long) = "recurring/$id"
@@ -84,6 +86,12 @@ fun AppRoot() {
     // Eine an die App übergebene Datei öffnet den Import, egal wo man gerade ist.
     val app = LocalApp.current
     val pendingImport by app.pendingImport.collectAsStateWithLifecycle()
+    val pendingBankCallback by app.pendingBankCallback.collectAsStateWithLifecycle()
+    LaunchedEffect(pendingBankCallback) {
+        if (pendingBankCallback != null && nav.currentDestination?.route != Routes.BANKS) {
+            nav.navigate(Routes.BANKS) { launchSingleTop = true }
+        }
+    }
     LaunchedEffect(pendingImport) {
         if (pendingImport != null && nav.currentDestination?.route != Routes.IMPORT) {
             nav.navigate(Routes.IMPORT) { launchSingleTop = true }
@@ -136,6 +144,7 @@ fun AppRoot() {
                     onDone = { nav.popBackStack() },
                 )
             }
+            composable(Routes.BANKS) { BankScreen(onBack = { nav.popBackStack() }) }
             composable(Routes.LOANS) {
                 LoansScreen(onBack = { nav.popBackStack() }, onOpen = { nav.navigate(Routes.loan(it)) })
             }
@@ -153,6 +162,7 @@ fun AppRoot() {
                 MoreScreen(
                     entries = listOf(
                         MoreEntry("Konten", "Konten anlegen, Kontostand und Dispo pflegen") { nav.navigate(Routes.ACCOUNTS) },
+                        MoreEntry("Bankverbindungen", "Umsätze automatisch direkt von der Bank abrufen") { nav.navigate(Routes.BANKS) },
                         MoreEntry("Kredite", "Restschuld, Zinsen und Tilgungsplan laufender Kredite") { nav.navigate(Routes.LOANS) },
                         MoreEntry("Dispozinsen", "Was dich das Überziehen deiner Konten kostet") { nav.navigate(Routes.OVERDRAFT) },
                         MoreEntry("Einstellungen", "Budgetzeitraum und Reserve festlegen") { nav.navigate(Routes.SETTINGS) },

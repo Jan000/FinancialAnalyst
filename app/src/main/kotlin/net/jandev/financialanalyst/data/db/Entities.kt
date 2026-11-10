@@ -35,6 +35,8 @@ data class AccountEntity(
     val connector: ConnectorType = ConnectorType.MANUAL,
     /** Konto-ID beim Bankabruf. */
     val externalId: String? = null,
+    /** Über Sitzungen hinweg stabile Kennung des Bankkontos; die externe ID ändert sich bei jeder neuen Freigabe. */
+    val externalHash: String? = null,
     val sessionId: Long? = null,
     val lastSync: Long? = null,
     val archived: Boolean = false,

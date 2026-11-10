@@ -5,6 +5,7 @@ import kotlinx.coroutines.flow.Flow
 import net.jandev.financialanalyst.data.db.AccountEntity
 import net.jandev.financialanalyst.data.db.AccountWithBalance
 import net.jandev.financialanalyst.data.db.AppDatabase
+import net.jandev.financialanalyst.data.db.BankSessionEntity
 import net.jandev.financialanalyst.data.db.CategoryEntity
 import net.jandev.financialanalyst.data.db.CategoryRuleEntity
 import net.jandev.financialanalyst.data.db.LoanEntity
@@ -155,6 +156,7 @@ class FinanceRepository(private val db: AppDatabase) {
     }
 
     val recurring: Flow<List<RecurringEntity>> = db.recurring().observeAll()
+    val bankSessions: Flow<List<BankSessionEntity>> = db.bankSessions().observeAll()
     val loans: Flow<List<LoanEntity>> = db.loans().observeAll()
     val loanExtraPayments: Flow<List<LoanExtraPaymentEntity>> = db.loans().observeExtraPayments()
 
@@ -308,7 +310,8 @@ class FinanceRepository(private val db: AppDatabase) {
         if (balanceAfterCents != null) {
             val account = db.accounts().byId(accountId)
             if (account != null) {
-                val sum = db.transactions().byAccount(accountId).sumOf { it.amountCents }
+                // Der genannte Stand umfasst nur fest gebuchte Umsätze; vorläufige zählen in der App zusätzlich.
+                val sum = db.transactions().byAccount(accountId).filter { it.status == TxStatus.BOOKED }.sumOf { it.amountCents }
                 db.accounts().update(account.copy(openingBalanceCents = balanceAfterCents - sum))
             }
         }

@@ -35,6 +35,11 @@ class MainActivity : ComponentActivity() {
 
     /** Eine geteilte oder geöffnete Datei landet im Import-Bildschirm. */
     private fun handleIntent(intent: Intent?) {
+        val data = intent?.data
+        if (intent?.action == Intent.ACTION_VIEW && data?.scheme == "finanzanalyst") {
+            container.pendingBankCallback.value = data
+            return
+        }
         val uri: Uri? = when (intent?.action) {
             Intent.ACTION_SEND -> IntentCompat.getParcelableExtra(intent, Intent.EXTRA_STREAM, Uri::class.java)
             Intent.ACTION_VIEW -> intent.data?.takeIf { it.scheme == "content" || it.scheme == "file" }

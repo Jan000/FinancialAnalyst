@@ -1,6 +1,9 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
+    <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+
     <application
         android:name=".FinanceApp"
         android:allowBackup="false"
@@ -35,6 +38,13 @@
                 <data android:mimeType="text/csv" />
                 <data android:mimeType="text/comma-separated-values" />
                 <data android:mimeType="application/csv" />
+            </intent-filter>
+            <!-- Rücksprung aus dem Browser nach der Bankfreigabe: finanzanalyst://callback?code=…&state=… -->
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="finanzanalyst" android:host="callback" />
             </intent-filter>
         </activity>
     </application>

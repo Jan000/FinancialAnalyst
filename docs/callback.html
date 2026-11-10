@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Zurück zum Finanzanalysten</title>
+<style>
+  body { font-family: system-ui, sans-serif; margin: 0; padding: 32px 16px; background: #f6f7f4; color: #171c1b; text-align: center; }
+  a.button { display: inline-block; margin-top: 16px; padding: 12px 24px; border-radius: 24px; background: #0f5b55; color: #fff; text-decoration: none; }
+  code { word-break: break-all; font-size: 13px; }
+  @media (prefers-color-scheme: dark) { body { background: #101413; color: #e1e4e1; } a.button { background: #7fd1c2; color: #00382f; } }
+</style>
+</head>
+<body>
+<h1>Freigabe abgeschlossen</h1>
+<p>Du wirst zurück in die App geleitet.</p>
+<a class="button" id="open" href="#">App öffnen</a>
+<p>Falls nichts passiert, kopiere diese Adresse und füge sie in der App unter „Freigabe abschließen“ ein:</p>
+<p><code id="url"></code></p>
+<script>
+  // Reicht code/state/error unverändert an die App weiter. Die Seite speichert und sendet nichts.
+  var target = 'finanzanalyst://callback' + window.location.search;
+  document.getElementById('open').href = target;
+  document.getElementById('url').textContent = target;
+  window.location.replace(target);
+</script>
+</body>
+</html>
