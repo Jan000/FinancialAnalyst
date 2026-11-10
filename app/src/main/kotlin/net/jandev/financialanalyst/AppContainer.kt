@@ -2,6 +2,9 @@ package net.jandev.financialanalyst
 
 import android.content.Context
 import android.net.Uri
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -15,6 +18,19 @@ import net.jandev.financialanalyst.data.banking.BankSync
 import net.jandev.financialanalyst.data.banking.SyncReport
 import net.jandev.financialanalyst.data.db.AppDatabase
 import net.jandev.financialanalyst.data.notifications.NotificationMapping
+
+/**
+ * Zustand der App-Sperre. Er gehört zum Prozess und nicht zur Activity: beim Drehen des Bildschirms entsteht die
+ * Activity neu, entsperrt bleibt die App trotzdem.
+ */
+class LockState {
+    var initialized = false
+    var locked by mutableStateOf(false)
+    var promptShowing = false
+
+    /** Zeitpunkt ([android.os.SystemClock.elapsedRealtime]), zu dem die App zuletzt in den Hintergrund ging. */
+    var leftAt = 0L
+}
 
 /** Hält die langlebigen Objekte der App; ersetzt ein DI-Framework. */
 class AppContainer(context: Context) {
@@ -32,6 +48,7 @@ class AppContainer(context: Context) {
     val driveBackup = DriveBackup(context, backups)
     val notificationMapping = NotificationMapping(context)
     val lastSyncReport = MutableStateFlow<SyncReport?>(null)
+    val lock = LockState()
 
     /** Rücksprung aus dem Browser nach der Freigabe bei der Bank. */
     val pendingBankCallback = MutableStateFlow<Uri?>(null)

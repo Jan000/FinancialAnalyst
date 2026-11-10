@@ -19,9 +19,6 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.CompositionLocalProvider
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
@@ -39,16 +36,18 @@ import net.jandev.financialanalyst.ui.theme.FinanceTheme
 class MainActivity : FragmentActivity() {
     private val container get() = (application as FinanceApp).container
 
+    private val lock get() = container.lock
     private var lockEnabled = false
-    private var locked by mutableStateOf(false)
-    private var leftAt = 0L
-    private var promptShowing = false
+    private lateinit var prompt: BiometricPrompt
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         // Einmal synchron lesen, damit beim Start nichts Ungeschütztes aufblitzt.
         applyLockSetting(runBlocking { container.settings.settings.first() }.appLock, initial = true)
+        // Hier und nicht erst beim Entsperren anlegen: so erreicht das Ergebnis einer Abfrage, die beim Drehen
+        // des Bildschirms gerade offen war, auch die neu entstandene Activity.
+        prompt = BiometricPrompt(this, ContextCompat.getMainExecutor(this), unlockCallback)
         lifecycleScope.launch {
             container.settings.settings.collect { applyLockSetting(it.appLock, initial = false) }
         }
@@ -56,7 +55,16 @@ class MainActivity : FragmentActivity() {
         setContent {
             FinanceTheme {
                 CompositionLocalProvider(LocalApp provides container) {
-                    if (locked) LockScreen(onUnlock = ::promptUnlock) else AppRoot()
+                    if (lock.locked) {
+                        LockScreen(
+                            onUnlock = {
+                                lock.promptShowing = false
+                                promptUnlock()
+                            },
+                        )
+                    } else {
+                        AppRoot()
+                    }
                 }
             }
         }
@@ -68,47 +76,47 @@ class MainActivity : FragmentActivity() {
         if (enabled) {
             // Kein Inhalt in der App-Übersicht und keine Screenshots, solange die Sperre aktiv ist.
             window.addFlags(WindowManager.LayoutParams.FLAG_SECURE)
-            if (initial) locked = true
+            // Nur beim Start des Prozesses sperren, nicht bei jeder neu entstandenen Activity (Bildschirm gedreht).
+            if (initial && !lock.initialized) lock.locked = true
         } else {
             window.clearFlags(WindowManager.LayoutParams.FLAG_SECURE)
-            locked = false
+            lock.locked = false
         }
+        lock.initialized = true
     }
 
     override fun onStop() {
         super.onStop()
-        leftAt = SystemClock.elapsedRealtime()
+        if (!isChangingConfigurations) lock.leftAt = SystemClock.elapsedRealtime()
     }
 
     override fun onStart() {
         super.onStart()
-        if (lockEnabled && leftAt != 0L && SystemClock.elapsedRealtime() - leftAt > RELOCK_AFTER_MS) locked = true
-        if (locked) promptUnlock()
+        if (lockEnabled && lock.leftAt != 0L && SystemClock.elapsedRealtime() - lock.leftAt > RELOCK_AFTER_MS) lock.locked = true
+        lock.leftAt = 0L
+        if (lock.locked) promptUnlock()
+    }
+
+    private val unlockCallback = object : BiometricPrompt.AuthenticationCallback() {
+        override fun onAuthenticationSucceeded(result: BiometricPrompt.AuthenticationResult) {
+            lock.promptShowing = false
+            lock.locked = false
+        }
+
+        override fun onAuthenticationError(errorCode: Int, errString: CharSequence) {
+            lock.promptShowing = false
+            // Ohne eingerichtete Gerätesperre gibt es nichts, womit man entsperren könnte: nicht aussperren.
+            if (errorCode == BiometricPrompt.ERROR_NO_DEVICE_CREDENTIAL || errorCode == BiometricPrompt.ERROR_HW_NOT_PRESENT ||
+                errorCode == BiometricPrompt.ERROR_NO_BIOMETRICS
+            ) {
+                lock.locked = false
+            }
+        }
     }
 
     private fun promptUnlock() {
-        if (promptShowing) return
-        promptShowing = true
-        val prompt = BiometricPrompt(
-            this,
-            ContextCompat.getMainExecutor(this),
-            object : BiometricPrompt.AuthenticationCallback() {
-                override fun onAuthenticationSucceeded(result: BiometricPrompt.AuthenticationResult) {
-                    promptShowing = false
-                    locked = false
-                }
-
-                override fun onAuthenticationError(errorCode: Int, errString: CharSequence) {
-                    promptShowing = false
-                    // Ohne eingerichtete Gerätesperre gibt es nichts, womit man entsperren könnte: nicht aussperren.
-                    if (errorCode == BiometricPrompt.ERROR_NO_DEVICE_CREDENTIAL || errorCode == BiometricPrompt.ERROR_HW_NOT_PRESENT ||
-                        errorCode == BiometricPrompt.ERROR_NO_BIOMETRICS
-                    ) {
-                        locked = false
-                    }
-                }
-            },
-        )
+        if (lock.promptShowing) return
+        lock.promptShowing = true
         prompt.authenticate(
             BiometricPrompt.PromptInfo.Builder()
                 .setTitle("Finanzanalyst entsperren")
