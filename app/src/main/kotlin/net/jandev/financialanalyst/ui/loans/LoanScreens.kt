@@ -62,19 +62,42 @@ import net.jandev.financialanalyst.ui.common.shortLabel
 import net.jandev.financialanalyst.ui.common.toFieldText
 import net.jandev.financialanalyst.ui.common.toPercentText
 import net.jandev.financialanalyst.ui.theme.LocalFinanceColors
+import net.jandev.financialanalyst.data.db.LoanRateChangeEntity
+import net.jandev.financialanalyst.data.db.TransactionEntity
+import net.jandev.financialanalyst.domain.Categorizer
+import net.jandev.financialanalyst.domain.RateChange
+import net.jandev.financialanalyst.ui.common.DropdownField
 import java.time.LocalDate
 import java.time.format.DateTimeFormatter
 import java.util.Locale
 
 private val monthYear = DateTimeFormatter.ofPattern("MMMM yyyy", Locale.GERMAN)
 
-private fun LoanEntity.terms(extras: List<LoanExtraPaymentEntity>) = LoanTerms(
+/** Ausgehende Buchungen an den verknüpften Empfänger; `null`, wenn der Kredit nicht verknüpft ist. */
+private fun actualPayments(matchKey: String?, transactions: List<TransactionEntity>): List<ExtraPayment>? {
+    if (matchKey.isNullOrBlank()) return null
+    return transactions
+        .filter { it.amountCents < 0 && Categorizer.learnKey(it.counterparty, it.purpose, it.accountId, it.amountCents) == matchKey }
+        .map { ExtraPayment(it.bookingDate, -it.amountCents) }
+}
+
+private fun LoanEntity.terms(
+    extras: List<LoanExtraPaymentEntity>,
+    changes: List<LoanRateChangeEntity>,
+    transactions: List<TransactionEntity>,
+    today: LocalDate,
+) = LoanTerms(
     principalCents = principalCents,
     ratePercent = ratePercent,
     monthlyPaymentCents = monthlyPaymentCents,
     firstPayment = firstPayment,
     extraPayments = extras.filter { it.loanId == id }.map { ExtraPayment(it.date, it.amountCents) },
+    rateChanges = changes.filter { it.loanId == id }.map { RateChange(it.fromDate, it.monthlyPaymentCents) },
+    actualPayments = actualPayments(matchKey, transactions),
+    actualUntil = today,
 )
+
+private data class Payee(val key: String, val name: String, val count: Int)
 
 private fun durationLabel(months: Int): String {
     val years = months / 12
@@ -98,6 +121,8 @@ fun LoansScreen(onBack: () -> Unit, onOpen: (Long) -> Unit) {
     val app = LocalApp.current
     val loans by app.repository.loans.collectAsStateWithLifecycle(initialValue = null)
     val extras by app.repository.loanExtraPayments.collectAsStateWithLifecycle(initialValue = emptyList())
+    val changes by app.repository.loanRateChanges.collectAsStateWithLifecycle(initialValue = emptyList())
+    val transactions by app.repository.transactions.collectAsStateWithLifecycle(initialValue = emptyList())
     val today = LocalDate.now()
 
     Screen(
@@ -120,11 +145,17 @@ fun LoansScreen(onBack: () -> Unit, onOpen: (Long) -> Unit) {
             )
             return@Screen
         }
-        val computed = remember(list, extras, today) {
+        val computed = remember(list, extras, changes, transactions, today) {
             list.map { loan ->
-                val terms = loan.terms(extras)
+                val terms = loan.terms(extras, changes, transactions, today)
                 val schedule = LoanCalculator.schedule(terms)
                 Triple(loan, schedule, LoanCalculator.status(terms, schedule, today))
+            }
+        }
+        val plannedNow = remember(list, changes, today) {
+            list.associate { loan ->
+                loan.id to (changes.filter { it.loanId == loan.id && it.fromDate <= today }.maxByOrNull { it.fromDate }?.monthlyPaymentCents
+                    ?: loan.monthlyPaymentCents)
             }
         }
         LazyColumn(
@@ -142,7 +173,7 @@ fun LoansScreen(onBack: () -> Unit, onOpen: (Long) -> Unit) {
                     )
                     LabeledRow("Raten pro Monat") {
                         AmountText(
-                            computed.filter { it.third.remainingCents > 0 }.sumOf { it.first.monthlyPaymentCents },
+                            computed.filter { it.third.remainingCents > 0 }.sumOf { plannedNow[it.first.id] ?: 0 },
                             withSign = false,
                             colored = false,
                         )
@@ -158,7 +189,8 @@ fun LoansScreen(onBack: () -> Unit, onOpen: (Long) -> Unit) {
                         Column(Modifier.weight(1f)) {
                             Text(loan.name, style = MaterialTheme.typography.titleMedium)
                             Text(
-                                "${loan.ratePercent.toPercentText().ifEmpty { "0" }} % · ${Money.format(loan.monthlyPaymentCents)} pro Monat",
+                                "${loan.ratePercent.toPercentText().ifEmpty { "0" }} % · ${Money.format(plannedNow[loan.id] ?: 0)} pro Monat" +
+                                    if (loan.matchKey != null) " · nach Umsätzen" else "",
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                             )
@@ -189,6 +221,8 @@ fun LoanDetailScreen(loanId: Long, onDone: () -> Unit) {
     val app = LocalApp.current
     val scope = rememberCoroutineScope()
     val allExtras by app.repository.loanExtraPayments.collectAsStateWithLifecycle(initialValue = emptyList())
+    val allChanges by app.repository.loanRateChanges.collectAsStateWithLifecycle(initialValue = emptyList())
+    val transactions by app.repository.transactions.collectAsStateWithLifecycle(initialValue = emptyList())
     val today = LocalDate.now()
 
     var loaded by remember { mutableStateOf<LoanEntity?>(null) }
@@ -201,6 +235,9 @@ fun LoanDetailScreen(loanId: Long, onDone: () -> Unit) {
     var whatIf by rememberSaveable { mutableStateOf("") }
     var extraAmount by rememberSaveable { mutableStateOf("") }
     var extraDate by rememberSaveable { mutableStateOf(today.toEpochDay()) }
+    var changeAmount by rememberSaveable { mutableStateOf("") }
+    var changeDate by rememberSaveable { mutableStateOf(today.toEpochDay()) }
+    var matchKey by rememberSaveable { mutableStateOf<String?>(null) }
     var confirmDelete by remember { mutableStateOf(false) }
 
     LaunchedEffect(loanId) {
@@ -213,6 +250,7 @@ fun LoanDetailScreen(loanId: Long, onDone: () -> Unit) {
             rate = loan.ratePercent.toPercentText().ifEmpty { "0" }
             payment = loan.monthlyPaymentCents.toFieldText()
             firstPayment = loan.firstPayment.toEpochDay()
+            matchKey = loan.matchKey
             ready = true
         }
     }
@@ -222,9 +260,28 @@ fun LoanDetailScreen(loanId: Long, onDone: () -> Unit) {
     val paymentCents = Money.parse(payment)?.takeIf { it > 0 }
     val valid = name.isNotBlank() && principalCents != null && ratePercent != null && paymentCents != null
     val extras = allExtras.filter { it.loanId == loanId && loanId != 0L }
+    val changes = allChanges.filter { it.loanId == loanId && loanId != 0L }
+    val actual = remember(matchKey, transactions) { actualPayments(matchKey, transactions) }
+    // Empfänger, an die mehrfach gezahlt wurde – daraus wählt man, wohin die Raten gehen.
+    val payees = remember(transactions) {
+        transactions.filter { it.amountCents < 0 && it.transferPeerId == null }
+            .groupBy { Categorizer.learnKey(it.counterparty, it.purpose, it.accountId, it.amountCents) }
+            .filter { it.value.size >= 2 }
+            .map { (key, list) ->
+                val newest = list.maxBy { it.bookingDate }
+                Payee(key, newest.counterparty.ifBlank { newest.purpose }.ifBlank { "Ohne Text, je ${Money.format(-newest.amountCents)}" }, list.size)
+            }
+            .sortedBy { it.name.lowercase() }
+    }
 
     val terms = if (principalCents != null && ratePercent != null && paymentCents != null) {
-        LoanTerms(principalCents, ratePercent, paymentCents, LocalDate.ofEpochDay(firstPayment), extras.map { ExtraPayment(it.date, it.amountCents) })
+        LoanTerms(
+            principalCents, ratePercent, paymentCents, LocalDate.ofEpochDay(firstPayment),
+            extraPayments = extras.map { ExtraPayment(it.date, it.amountCents) },
+            rateChanges = changes.map { RateChange(it.fromDate, it.monthlyPaymentCents) },
+            actualPayments = actual,
+            actualUntil = today,
+        )
     } else {
         null
     }
@@ -264,6 +321,30 @@ fun LoanDetailScreen(loanId: Long, onDone: () -> Unit) {
             MoneyField(value = payment, onValueChange = { payment = it }, label = "Monatliche Rate")
             DateField(date = LocalDate.ofEpochDay(firstPayment), onDateChange = { firstPayment = it.toEpochDay() }, label = "Erste Rate am")
 
+            SectionCard(title = "Tatsächliche Zahlungen") {
+                Text(
+                    "Wähle, an wen die Raten gehen. Dann zählt für die Vergangenheit, was laut Umsätzen wirklich gezahlt wurde – " +
+                        "auch wenn es mal 50 €, mal 200 € oder gar nichts war. Die Rate oben gilt für die Zukunft.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                DropdownField(
+                    label = "Zahlungen an",
+                    options = listOf(Payee("", "Nicht verknüpfen (nach Plan rechnen)", 0)) + payees,
+                    selected = payees.firstOrNull { it.key == matchKey }
+                        ?: matchKey?.let { Payee(it, "Verknüpfter Empfänger (derzeit ohne Umsätze)", 0) },
+                    onSelect = { matchKey = it.key.ifEmpty { null } },
+                    optionLabel = { if (it.count > 0) "${it.name} (${it.count} Zahlungen)" else it.name },
+                    placeholder = "Nicht verknüpft",
+                )
+                if (actual != null) {
+                    val since = actual.filter { it.date >= LocalDate.ofEpochDay(firstPayment).minusMonths(1) }
+                    LabeledRow("Gezahlt laut Umsätzen (${since.size} Zahlungen)") {
+                        AmountText(since.sumOf { it.amountCents }, withSign = false, colored = false)
+                    }
+                }
+            }
+
             if (terms != null && schedule != null) {
                 LoanSummary(terms, schedule, today)
             }
@@ -278,6 +359,7 @@ fun LoanDetailScreen(loanId: Long, onDone: () -> Unit) {
                         ratePercent = ratePercent ?: return@Button,
                         monthlyPaymentCents = paymentCents ?: return@Button,
                         firstPayment = LocalDate.ofEpochDay(firstPayment),
+                        matchKey = matchKey,
                     )
                     scope.launch {
                         app.repository.saveLoan(loan)
@@ -288,7 +370,44 @@ fun LoanDetailScreen(loanId: Long, onDone: () -> Unit) {
             ) { Text("Speichern") }
 
             if (loanId != 0L) {
+                SectionCard(title = "Raten nach Zeitraum") {
+                    Text(
+                        "Wenn sich die Rate ändert oder du eine Zeit lang aussetzt (Rate 0 €): ab wann gilt welcher Betrag?",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    changes.forEach { change ->
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text("ab ${change.fromDate.shortLabel()}", modifier = Modifier.weight(1f))
+                            Text(if (change.monthlyPaymentCents == 0L) "Pause" else "${Money.format(change.monthlyPaymentCents)} pro Monat")
+                            IconButton(onClick = { scope.launch { app.repository.deleteRateChange(change) } }) {
+                                Icon(Icons.Filled.Clear, contentDescription = "Ratenänderung entfernen")
+                            }
+                        }
+                    }
+                    HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+                    MoneyField(value = changeAmount, onValueChange = { changeAmount = it }, label = "Neue Monatsrate")
+                    DateField(date = LocalDate.ofEpochDay(changeDate), onDateChange = { changeDate = it.toEpochDay() }, label = "Gilt ab")
+                    val changeCents = Money.parse(changeAmount)?.takeIf { it >= 0 }
+                    OutlinedButton(
+                        enabled = changeCents != null,
+                        onClick = {
+                            val cents = changeCents ?: return@OutlinedButton
+                            scope.launch {
+                                app.repository.addRateChange(
+                                    LoanRateChangeEntity(loanId = loanId, fromDate = LocalDate.ofEpochDay(changeDate), monthlyPaymentCents = cents),
+                                )
+                                changeAmount = ""
+                            }
+                        },
+                    ) { Text("Ratenänderung hinzufügen") }
+                }
                 SectionCard(title = "Sondertilgungen") {
+                    Text(
+                        "Einmalige Zahlungen zusätzlich zur Rate – auch solche, die nicht über ein verbundenes Konto liefen (etwa bar).",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
                     if (extras.isEmpty()) {
                         Text("Noch keine eingetragen.", color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }

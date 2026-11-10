@@ -12,6 +12,7 @@ import net.jandev.financialanalyst.data.db.CategoryEntity
 import net.jandev.financialanalyst.data.db.CategoryRuleEntity
 import net.jandev.financialanalyst.data.db.LoanEntity
 import net.jandev.financialanalyst.data.db.LoanExtraPaymentEntity
+import net.jandev.financialanalyst.data.db.LoanRateChangeEntity
 import net.jandev.financialanalyst.data.db.RecurringEntity
 import net.jandev.financialanalyst.data.db.TransactionEntity
 import net.jandev.financialanalyst.domain.AccountType
@@ -248,6 +249,12 @@ class FinanceRepository(
     suspend fun addExtraPayment(payment: LoanExtraPaymentEntity) = db.loans().insertExtra(payment)
 
     suspend fun deleteExtraPayment(payment: LoanExtraPaymentEntity) = db.loans().deleteExtra(payment)
+
+    val loanRateChanges: Flow<List<LoanRateChangeEntity>> = db.loans().observeRateChanges()
+
+    suspend fun addRateChange(change: LoanRateChangeEntity) = db.loans().insertRateChange(change)
+
+    suspend fun deleteRateChange(change: LoanRateChangeEntity) = db.loans().deleteRateChange(change)
 
     suspend fun transactionsOf(accountId: Long): List<TransactionEntity> = db.transactions().byAccount(accountId)
 

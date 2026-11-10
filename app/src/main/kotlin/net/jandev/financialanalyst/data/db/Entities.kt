@@ -140,6 +140,26 @@ data class LoanEntity(
     /** Datum der ersten Rate. */
     val firstPayment: LocalDate,
     val note: String = "",
+    /**
+     * Schlüssel des Zahlungsempfängers ([net.jandev.financialanalyst.domain.Categorizer.learnKey]); ist er gesetzt,
+     * zählen für die Vergangenheit die tatsächlichen Buchungen an ihn statt der geplanten Rate.
+     */
+    val matchKey: String? = null,
+)
+
+/** Ab [fromDate] gilt für den Kredit eine andere Monatsrate. */
+@Entity(
+    tableName = "loan_rate_changes",
+    foreignKeys = [
+        ForeignKey(entity = LoanEntity::class, parentColumns = ["id"], childColumns = ["loanId"], onDelete = ForeignKey.CASCADE),
+    ],
+    indices = [Index("loanId")],
+)
+data class LoanRateChangeEntity(
+    @PrimaryKey(autoGenerate = true) val id: Long = 0,
+    val loanId: Long,
+    val fromDate: LocalDate,
+    val monthlyPaymentCents: Long,
 )
 
 @Entity(

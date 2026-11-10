@@ -6,6 +6,9 @@ import kotlin.math.roundToLong
 
 data class ExtraPayment(val date: LocalDate, val amountCents: Long)
 
+/** Ab [from] gilt eine andere Monatsrate; 0 bedeutet eine Zahlpause. */
+data class RateChange(val from: LocalDate, val monthlyPaymentCents: Long)
+
 data class LoanTerms(
     val principalCents: Long,
     /** Sollzins p. a. in Prozent. */
@@ -13,7 +16,18 @@ data class LoanTerms(
     val monthlyPaymentCents: Long,
     val firstPayment: LocalDate,
     val extraPayments: List<ExtraPayment> = emptyList(),
-)
+    val rateChanges: List<RateChange> = emptyList(),
+    /**
+     * Tatsächlich geleistete Zahlungen (aus den Umsätzen). Sind sie angegeben, zählen bis [actualUntil]
+     * sie statt der geplanten Rate – auch wenn mal weniger, mehr oder gar nichts gezahlt wurde.
+     */
+    val actualPayments: List<ExtraPayment>? = null,
+    val actualUntil: LocalDate = LocalDate.MIN,
+) {
+    /** Die an [date] geplante Monatsrate. */
+    fun plannedPayment(date: LocalDate): Long =
+        rateChanges.filter { it.from <= date }.maxByOrNull { it.from }?.monthlyPaymentCents ?: monthlyPaymentCents
+}
 
 data class LoanRow(
     val date: LocalDate,
@@ -57,9 +71,19 @@ object LoanCalculator {
 
         while (remaining > 0 && rows.size < MAX_MONTHS) {
             val interest = (remaining * monthlyRate).roundToLong()
-            val payment = minOf(terms.monthlyPaymentCents, remaining + interest)
+            val planned = terms.plannedPayment(date)
+            val actual = terms.actualPayments?.filter { it.date > previous && it.date <= date }?.sumOf { it.amountCents }
+            val past = actual != null && date <= terms.actualUntil
+            val wanted = when {
+                // Vergangenheit: es zählt, was wirklich gezahlt wurde.
+                past -> actual ?: 0
+                // Die laufende Rate ist schon (ganz oder teilweise) bezahlt: nicht doppelt ansetzen.
+                actual != null && actual > 0 -> maxOf(planned, actual)
+                else -> planned
+            }
+            val payment = minOf(wanted, remaining + interest)
             val principal = payment - interest
-            if (principal <= 0 && extras.none { it.date > previous }) {
+            if (!past && principal <= 0 && extras.none { it.date > previous } && terms.rateChanges.none { it.from > date }) {
                 // Die Rate deckt nicht einmal die Zinsen: der Kredit wird nie getilgt.
                 return LoanSchedule(rows, totalInterest, totalPaid, null)
             }

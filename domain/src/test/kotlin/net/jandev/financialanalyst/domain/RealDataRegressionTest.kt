@@ -104,3 +104,52 @@ class PayPalTextTest {
         assertEquals(false, PayPalText.isPayout("Laden (PayPal)", "Erstattung", 500))
     }
 }
+
+class LoanVariablePaymentsTest {
+    private val start = LocalDate.of(2026, 1, 1)
+
+    @Test
+    fun rateChangesApplyFromTheirDate() {
+        val terms = LoanTerms(
+            principalCents = 100000, ratePercent = 0.0, monthlyPaymentCents = 10000, firstPayment = start,
+            // März und April Pause, ab Mai doppelte Rate.
+            rateChanges = listOf(RateChange(start.plusMonths(2), 0), RateChange(start.plusMonths(4), 20000)),
+        )
+        val rows = LoanCalculator.schedule(terms).rows
+        assertEquals(listOf(10000L, 10000L, 0L, 0L, 20000L, 20000L, 20000L, 20000L), rows.map { it.paymentCents })
+        assertEquals(0L, rows.last().remainingCents)
+    }
+
+    @Test
+    fun actualPaymentsReplaceThePlanInThePast() {
+        val today = start.plusMonths(3).plusDays(10)
+        val terms = LoanTerms(
+            principalCents = 100000, ratePercent = 0.0, monthlyPaymentCents = 10000, firstPayment = start,
+            // Mal 50 €, mal nichts, mal 200 €.
+            actualPayments = listOf(
+                ExtraPayment(start, 5000),
+                ExtraPayment(start.plusMonths(2).minusDays(3), 20000),
+                ExtraPayment(start.plusMonths(3), 5000),
+            ),
+            actualUntil = today,
+        )
+        val schedule = LoanCalculator.schedule(terms)
+        assertEquals(listOf(5000L, 0L, 20000L, 5000L), schedule.rows.take(4).map { it.paymentCents })
+        val status = LoanCalculator.status(terms, schedule, today)
+        assertEquals(70000L, status.remainingCents)
+        // Danach läuft es mit der geplanten Rate weiter: 700 € in sieben Raten.
+        assertEquals(4 + 7, schedule.rows.size)
+    }
+
+    @Test
+    fun aPaymentAlreadyMadeForTheCurrentInstalmentIsNotCountedTwice() {
+        val today = start.plusDays(20)
+        val terms = LoanTerms(
+            principalCents = 30000, ratePercent = 0.0, monthlyPaymentCents = 10000, firstPayment = start,
+            actualPayments = listOf(ExtraPayment(start, 10000), ExtraPayment(start.plusDays(15), 10000)),
+            actualUntil = today,
+        )
+        val rows = LoanCalculator.schedule(terms).rows
+        assertEquals(listOf(10000L, 10000L, 10000L), rows.map { it.paymentCents })
+    }
+}

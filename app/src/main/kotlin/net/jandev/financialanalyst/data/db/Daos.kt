@@ -159,6 +159,15 @@ interface LoanDao {
 
     @Delete
     suspend fun deleteExtra(payment: LoanExtraPaymentEntity)
+
+    @Query("SELECT * FROM loan_rate_changes ORDER BY fromDate")
+    fun observeRateChanges(): Flow<List<LoanRateChangeEntity>>
+
+    @Insert
+    suspend fun insertRateChange(change: LoanRateChangeEntity): Long
+
+    @Delete
+    suspend fun deleteRateChange(change: LoanRateChangeEntity)
 }
 
 @Dao
