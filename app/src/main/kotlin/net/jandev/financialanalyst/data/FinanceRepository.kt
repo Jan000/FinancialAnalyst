@@ -6,6 +6,8 @@ import net.jandev.financialanalyst.data.db.AccountEntity
 import net.jandev.financialanalyst.data.db.AccountWithBalance
 import net.jandev.financialanalyst.data.db.AppDatabase
 import net.jandev.financialanalyst.data.db.BankSessionEntity
+import net.jandev.financialanalyst.data.db.BudgetEntity
+import net.jandev.financialanalyst.data.db.SavingsGoalEntity
 import net.jandev.financialanalyst.data.db.CategoryEntity
 import net.jandev.financialanalyst.data.db.CategoryRuleEntity
 import net.jandev.financialanalyst.data.db.LoanEntity
@@ -157,6 +159,16 @@ class FinanceRepository(private val db: AppDatabase) {
 
     val recurring: Flow<List<RecurringEntity>> = db.recurring().observeAll()
     val bankSessions: Flow<List<BankSessionEntity>> = db.bankSessions().observeAll()
+    val budgets: Flow<List<BudgetEntity>> = db.planning().observeBudgets()
+    val goals: Flow<List<SavingsGoalEntity>> = db.planning().observeGoals()
+
+    suspend fun setBudget(budget: BudgetEntity) = db.planning().upsertBudget(budget)
+
+    suspend fun removeBudget(categoryId: Long) = db.planning().deleteBudget(categoryId)
+
+    suspend fun saveGoal(goal: SavingsGoalEntity) = db.planning().upsertGoal(goal)
+
+    suspend fun deleteGoal(goal: SavingsGoalEntity) = db.planning().deleteGoal(goal)
     val loans: Flow<List<LoanEntity>> = db.loans().observeAll()
     val loanExtraPayments: Flow<List<LoanExtraPaymentEntity>> = db.loans().observeExtraPayments()
 

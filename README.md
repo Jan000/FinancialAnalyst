@@ -1,1 +1,95 @@
-"# FinancialAnalyst" 
+# Finanzanalyst
+
+Android-App, die alle eigenen Konten zusammenführt und auswertet: Einnahmen und Ausgaben nach Tag, Woche, Monat,
+Quartal und Jahr, Fixkosten und Abos, ein Tagesbudget („Heute noch verfügbar"), Kredite mit Tilgungsplan,
+Dispozinsen je Konto, Budgets, Sparziele und eine verschlüsselte Sicherung in Google Drive.
+
+Alle Daten liegen auf dem Gerät. Nach außen gehen nur der Bankabruf (Enable Banking) und die verschlüsselte
+Sicherung (Google Drive), beides erst nach ausdrücklicher Einrichtung.
+
+## Bauen und installieren
+
+Voraussetzungen: JDK 17 oder neuer, Android SDK (Plattform 37), `local.properties` mit `sdk.dir=…`.
+
+```
+.\gradlew.bat :domain:test :app:testDebugUnitTest   # Tests
+.\gradlew.bat :app:assembleDebug                    # APK nach app\build\outputs\apk\debug
+adb install -r app\build\outputs\apk\debug\app-debug.apk
+```
+
+## Aufbau
+
+| Modul | Inhalt |
+|---|---|
+| `domain` | Reines Kotlin ohne Android: Geldbeträge, CSV-Import, Dubletten-Abgleich, Kategorisierung, Umbuchungs- und Dauerposten-Erkennung, Auswertung, Budget, Kredite, Dispo, Sicherungsverschlüsselung, Token-Signatur. Vollständig per Unit-Test abgedeckt. |
+| `app` | Room-Datenbank, Bankabruf, Benachrichtigungs-Dienst, Sicherung, Compose-Oberfläche. |
+
+Geldbeträge sind durchgehend ganze Cent (`Long`). Der Kontostand eines Kontos ist immer
+`Anfangssaldo + Summe der Umsätze`; dadurch lässt sich jeder frühere Tagessaldo (für Dispozinsen und den
+Vermögensverlauf) rekonstruieren.
+
+## Woher die Umsätze kommen
+
+1. **Bankabruf** über [Enable Banking](https://enablebanking.com) – derselbe PSD2-Zugang, den auch Apps wie Finanzguru nutzen.
+2. **Datei-Import** (CSV) für alles, was dort nicht gelistet ist. DKB, N26, American Express und PayPal werden erkannt,
+   andere Dateien über eine Spaltenzuordnung eingelesen. Eine Datei lässt sich auch aus anderen Apps an den Finanzanalysten *teilen*.
+3. **Benachrichtigungen** der Banking-Apps als vorläufige Umsätze, die die echte Buchung später ersetzt.
+4. **Von Hand.**
+
+Derselbe Umsatz erscheint nie doppelt, egal über welchen Weg er zuerst kam (`Reconciler`).
+
+### Bankabruf einrichten
+
+Für eigene Konten ist Enable Banking laut deren Nutzungsbedingungen kostenlos („restricted mode").
+
+1. Auf <https://enablebanking.com/sign-in/> anmelden, im Control Panel **Add a new application**, Umgebung **Production**.
+2. Als Redirect-URL `finanzanalyst://callback` eintragen. Falls das Formular nur `https`-Adressen annimmt, stattdessen
+   die Weiterleitungsseite `docs/callback.html` dieses Repos irgendwo per HTTPS bereitstellen (z. B. GitHub Pages) und
+   deren Adresse eintragen; die Seite reicht `code` und `state` nur an die App weiter.
+3. Die erzeugte Schlüsseldatei `<App-ID>.pem` aufs Handy laden.
+4. Im Control Panel **Activate by linking accounts** wählen und jedes Konto verknüpfen, das abgerufen werden soll.
+5. In der App: **Mehr → Bankverbindungen**, Schlüsseldatei wählen (die App-ID wird aus dem Dateinamen übernommen),
+   dieselbe Rücksprung-Adresse eintragen, dann **Bank verbinden**.
+
+Der private Schlüssel liegt AES-GCM-verschlüsselt auf dem Gerät, der Schlüssel dazu im Android Keystore. Er ist nicht
+Teil der Sicherung. Enable Banking rät davon ab, Schlüssel in Apps einzubetten, die an Dritte verteilt werden – diese
+App ist für den Eigengebrauch mit dem eigenen Schlüssel gedacht und darf so nicht veröffentlicht werden.
+
+Die Bankfreigabe gilt meist 180 Tage und muss dann erneuert werden; die App weist rechtzeitig darauf hin. Im
+Hintergrund wird dreimal täglich abgerufen, weil Banken ohne Nutzerbestätigung meist nur vier Abrufe pro Tag zulassen.
+
+### Google-Drive-Sicherung einrichten
+
+Die Sicherung ist mit einem Passwort verschlüsselt, das nur du kennst (AES-256-GCM, Schlüssel per PBKDF2), und liegt
+im versteckten App-Ordner von Drive (`drive.appdata`).
+
+1. In der [Google Cloud Console](https://console.cloud.google.com/) ein Projekt anlegen und die **Google Drive API** aktivieren.
+2. **OAuth-Zustimmungsbildschirm** einrichten (Typ „Extern", eigenes Google-Konto als Testnutzer).
+3. **Anmeldedaten → OAuth-Client-ID → Android**: Paketname `net.jandev.financialanalyst` und den SHA-1-Fingerabdruck
+   des Signaturschlüssels eintragen. Für Debug-Builds:
+   `keytool -list -v -keystore %USERPROFILE%\.android\debug.keystore -alias androiddebugkey -storepass android`
+4. In der App: **Mehr → Sicherung**, Passwort festlegen, „Täglich automatisch sichern" einschalten.
+
+Eine Client-ID muss nicht in die App eingetragen werden; Google ordnet sie über Paketname und Fingerabdruck zu.
+Ohne Google-Einrichtung funktioniert die Sicherung als Datei (**Datei speichern / Aus Datei laden**).
+
+## Stand der Erprobung
+
+Im Emulator durchgespielt: Konten und Umsätze anlegen, CSV-Import, Analyse, Fixkosten, Budget, Kredite, Budgets je
+Kategorie, Sicherung als Datei mit Wiederherstellung, App-Sperre.
+
+Noch nicht gegen echte Gegenstellen geprüft, weil dafür persönliche Zugänge nötig sind:
+
+- Bankabruf gegen Enable Banking (der Client ist gegen einen Mock-Server mit Beispielantworten aus der Dokumentation getestet).
+- Upload und Download bei Google Drive.
+- Das Mitlesen der Benachrichtigungen echter Banking-Apps; deren Wortlaute können vom Parser abweichen.
+- Die CSV-Formate sind nach dem bekannten Aufbau der Exporte gebaut und mit erfundenen Dateien getestet, nicht mit echten.
+
+Echte Kontoauszüge, Schlüsseldateien und Exporte gehören nicht ins Repo (`.gitignore` schließt `*.pem` und `private-data/` aus).
+
+## Noch offen
+
+- Digitale Kassenbons (Lidl, REWE, Netto) – bewusst zurückgestellt.
+- Automatischer Abruf für Trade Republic, falls dort kein PSD2-Zugang verfügbar ist.
+- Datenbank-Migrationen: Das Schema steht noch auf Version 1; vor einer Schemaänderung nach dem ersten echten Einsatz
+  muss eine Migration geschrieben werden.

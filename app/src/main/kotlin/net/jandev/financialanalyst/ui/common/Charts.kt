@@ -169,3 +169,45 @@ fun ShareBar(fraction: Float, color: Color, modifier: Modifier = Modifier) {
         )
     }
 }
+
+/**
+ * Verlauf einer einzelnen Größe als Linie mit beschrifteten Extremwerten.
+ * Die Achse beginnt nicht bei null: gezeigt wird die Veränderung, die Beträge stehen als Zahlen dabei.
+ */
+@Composable
+fun TrendLine(points: List<Long>, startLabel: String, endLabel: String, modifier: Modifier = Modifier) {
+    if (points.size < 2) return
+    val line = MaterialTheme.colorScheme.primary
+    val surface = MaterialTheme.colorScheme.surfaceContainerLow
+    val grid = LocalFinanceColors.current.chartGrid
+    val min = points.min()
+    val max = points.max()
+    val description = "Verlauf von ${Money.format(points.first())} ($startLabel) auf ${Money.format(points.last())} ($endLabel); " +
+        "niedrigster Stand ${Money.format(min)}, höchster ${Money.format(max)}"
+
+    Column(modifier, verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        Canvas(Modifier.fillMaxWidth().height(96.dp).semantics { contentDescription = description }) {
+            val pad = 6.dp.toPx()
+            val span = (max - min).coerceAtLeast(1).toFloat()
+            fun x(index: Int) = pad + (size.width - 2 * pad) * index / (points.size - 1)
+            fun y(value: Long) = size.height - pad - (size.height - 2 * pad) * (value - min) / span
+            drawLine(grid, Offset(0f, size.height - 1f), Offset(size.width, size.height - 1f), strokeWidth = 1.dp.toPx())
+            val path = Path().apply {
+                points.forEachIndexed { index, value -> if (index == 0) moveTo(x(0), y(value)) else lineTo(x(index), y(value)) }
+            }
+            drawPath(path, line, style = androidx.compose.ui.graphics.drawscope.Stroke(width = 2.dp.toPx(), cap = androidx.compose.ui.graphics.StrokeCap.Round, join = androidx.compose.ui.graphics.StrokeJoin.Round))
+            // Endpunkt hervorheben, mit Ring in Flächenfarbe.
+            drawCircle(surface, radius = 6.dp.toPx(), center = Offset(x(points.lastIndex), y(points.last())))
+            drawCircle(line, radius = 4.dp.toPx(), center = Offset(x(points.lastIndex), y(points.last())))
+        }
+        Row {
+            Text(startLabel, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.weight(1f))
+            Text(
+                "Tief ${Money.format(min)} · Hoch ${Money.format(max)}",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Text(endLabel, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.weight(1f), textAlign = androidx.compose.ui.text.style.TextAlign.End)
+        }
+    }
+}

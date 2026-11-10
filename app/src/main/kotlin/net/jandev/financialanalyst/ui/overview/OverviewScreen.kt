@@ -22,6 +22,11 @@ import net.jandev.financialanalyst.data.BudgetCalculator
 import net.jandev.financialanalyst.data.Settings
 import net.jandev.financialanalyst.domain.BudgetResult
 import net.jandev.financialanalyst.domain.Money
+import net.jandev.financialanalyst.domain.NetWorth
+import net.jandev.financialanalyst.ui.common.TrendLine
+import net.jandev.financialanalyst.ui.common.shortLabel
+import net.jandev.financialanalyst.ui.planning.BudgetRow
+import net.jandev.financialanalyst.ui.planning.rememberBudgetStatus
 import net.jandev.financialanalyst.ui.common.AmountText
 import net.jandev.financialanalyst.ui.common.dayMonthLabel
 import net.jandev.financialanalyst.ui.theme.LocalFinanceColors
@@ -42,6 +47,7 @@ fun OverviewScreen(
     onEditTransaction: (Long) -> Unit,
     onOpenRecurring: () -> Unit,
     onOpenSettings: () -> Unit,
+    onOpenBudgets: () -> Unit,
 ) {
     val app = LocalApp.current
     val accounts by app.repository.accounts.collectAsStateWithLifecycle(initialValue = null)
@@ -78,13 +84,45 @@ fun OverviewScreen(
             if (budget != null) {
                 BudgetCard(budget, today, onOpenRecurring, onOpenSettings)
             }
+            val categoryBudgets = rememberBudgetStatus(today).filter { it.isOver || it.willExceed }
+            if (categoryBudgets.isNotEmpty()) {
+                SectionCard(title = "Budgets im Blick behalten") {
+                    categoryBudgets.take(3).forEach { status ->
+                        BudgetRow(categoryNames[status.categoryId] ?: "Kategorie", status, onClick = onOpenBudgets)
+                    }
+                }
+            }
+            val total = list.sumOf { it.balanceCents }
             SectionCard(title = "Gesamtvermögen") {
                 AmountText(
-                    list.sumOf { it.balanceCents },
+                    total,
                     style = MaterialTheme.typography.displaySmall,
                     withSign = false,
-                    colored = false,
+                    colored = total < 0,
+                    negativeIsAlarming = true,
                 )
+                // Der Verlauf beginnt mit dem ersten erfassten Monat: davor kennt die App den Stand nicht.
+                val first = transactions.minOfOrNull { it.bookingDate }
+                val months = if (first == null) 0 else {
+                    (java.time.temporal.ChronoUnit.MONTHS.between(first.withDayOfMonth(1), today.withDayOfMonth(1)).toInt() + 1).coerceAtMost(12)
+                }
+                val history = remember(total, transactions, today, months) {
+                    NetWorth.history(total, transactions.map { it.bookingDate to it.amountCents }, today, months.coerceAtLeast(1))
+                }
+                // Erst zeigen, wenn es über mindestens drei Monate etwas zu sehen gibt.
+                if (months >= 3) {
+                    val change = total - history.first().second
+                    Text(
+                        "${Money.format(change, withSign = true)} seit ${history.first().first.shortLabel()}",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    TrendLine(
+                        points = history.map { it.second },
+                        startLabel = history.first().first.shortLabel(),
+                        endLabel = "heute",
+                    )
+                }
             }
             SectionCard(title = "Konten") {
                 list.forEach { item ->

@@ -41,6 +41,8 @@ import net.jandev.financialanalyst.ui.loans.OverdraftScreen
 import net.jandev.financialanalyst.ui.more.MoreEntry
 import net.jandev.financialanalyst.ui.more.MoreScreen
 import net.jandev.financialanalyst.ui.overview.OverviewScreen
+import net.jandev.financialanalyst.ui.planning.BudgetsScreen
+import net.jandev.financialanalyst.ui.planning.GoalsScreen
 import net.jandev.financialanalyst.ui.recurring.RecurringEditScreen
 import net.jandev.financialanalyst.ui.recurring.RecurringScreen
 import net.jandev.financialanalyst.ui.settings.BackupScreen
@@ -63,6 +65,8 @@ object Routes {
     const val IMPORT = "import"
     const val SETTINGS = "settings"
     const val LOANS = "loans"
+    const val BUDGETS = "budgets"
+    const val GOALS = "goals"
     const val BACKUP = "backup"
     const val NOTIFICATIONS = "notifications"
     const val BANKS = "banks"
@@ -130,6 +134,7 @@ fun AppRoot() {
                     onEditTransaction = { nav.navigate(Routes.transactionEdit(it)) },
                     onOpenRecurring = { nav.openTopLevel(TopLevel.Recurring) },
                     onOpenSettings = { nav.navigate(Routes.SETTINGS) },
+                    onOpenBudgets = { nav.navigate(Routes.BUDGETS) },
                 )
             }
             composable(TopLevel.Transactions.route) {
@@ -151,6 +156,8 @@ fun AppRoot() {
             composable(Routes.BANKS) { BankScreen(onBack = { nav.popBackStack() }) }
             composable(Routes.NOTIFICATIONS) { NotificationScreen(onBack = { nav.popBackStack() }) }
             composable(Routes.BACKUP) { BackupScreen(onBack = { nav.popBackStack() }) }
+            composable(Routes.BUDGETS) { BudgetsScreen(onBack = { nav.popBackStack() }) }
+            composable(Routes.GOALS) { GoalsScreen(onBack = { nav.popBackStack() }) }
             composable(Routes.LOANS) {
                 LoansScreen(onBack = { nav.popBackStack() }, onOpen = { nav.navigate(Routes.loan(it)) })
             }
@@ -170,6 +177,8 @@ fun AppRoot() {
                         MoreEntry("Konten", "Konten anlegen, Kontostand und Dispo pflegen") { nav.navigate(Routes.ACCOUNTS) },
                         MoreEntry("Bankverbindungen", "Umsätze automatisch direkt von der Bank abrufen") { nav.navigate(Routes.BANKS) },
                         MoreEntry("Zahlungen sofort erfassen", "Benachrichtigungen der Banking-Apps als vorläufige Umsätze mitlesen") { nav.navigate(Routes.NOTIFICATIONS) },
+                        MoreEntry("Budgets", "Obergrenzen je Kategorie für den Budgetzeitraum") { nav.navigate(Routes.BUDGETS) },
+                        MoreEntry("Sparziele", "Worauf du sparst und wie viel dafür monatlich nötig ist") { nav.navigate(Routes.GOALS) },
                         MoreEntry("Kredite", "Restschuld, Zinsen und Tilgungsplan laufender Kredite") { nav.navigate(Routes.LOANS) },
                         MoreEntry("Dispozinsen", "Was dich das Überziehen deiner Konten kostet") { nav.navigate(Routes.OVERDRAFT) },
                         MoreEntry("Sicherung", "Verschlüsselt in Google Drive oder als Datei sichern und wiederherstellen") { nav.navigate(Routes.BACKUP) },
