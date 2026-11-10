@@ -29,7 +29,7 @@ object BudgetCalculator {
         val todayVariableNet = transactions
             .asSequence()
             .filter { it.bookingDate == today && it.accountId in accountIds }
-            .filter { RecurringDetector.matchKey(it.counterparty, it.amountCents) !in fixedKeys }
+            .filter { RecurringDetector.matchKey(it.toTx()) !in fixedKeys }
             .sumOf { it.amountCents }
 
         val period = Budget.period(today, settings.budgetStartDay)

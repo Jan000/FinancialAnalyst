@@ -11,6 +11,13 @@ import androidx.work.WorkManager
 import androidx.work.WorkerParameters
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import android.util.Log
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.JsonNull
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
 import net.jandev.financialanalyst.FinanceApp
 import net.jandev.financialanalyst.data.FinanceRepository
 import net.jandev.financialanalyst.data.db.AccountEntity
@@ -43,6 +50,8 @@ class BankSync(
     private val repository: FinanceRepository,
     val credentials: BankCredentials,
     private val afterChange: suspend () -> Unit,
+    /** Nur in Testbuilds: protokolliert, welche Felder eine Bank liefert (Namen und Anzahl, keine Inhalte). */
+    private val diagnostics: Boolean = false,
     private val api: EnableBankingApi = EnableBankingApi(tokenProvider = { credentials.token() }),
 ) {
     private val mutex = Mutex()
@@ -121,12 +130,14 @@ class BankSync(
             } else {
                 db.accounts().insert(
                     AccountEntity(
-                        name = listOfNotNull(remote.name, remote.product, remote.details).firstOrNull { it.isNotBlank() }
-                            ?: "${pending.bankName} ${iban.takeLast(4)}".trim(),
+                        // `name` ist laut Schnittstelle der Kontoinhaber und taugt nicht als Kontoname.
+                        name = listOfNotNull(remote.product, remote.details).firstOrNull { it.isNotBlank() }
+                            ?.let { "${pending.bankName} $it" } ?: pending.bankName,
                         institution = pending.bankName,
-                        type = when (remote.cashAccountType) {
-                            "CARD" -> AccountType.CREDIT_CARD
-                            "SVGS" -> AccountType.SAVINGS
+                        type = when {
+                            pending.bankName.contains("paypal", ignoreCase = true) -> AccountType.PAYPAL
+                            remote.cashAccountType == "CARD" -> AccountType.CREDIT_CARD
+                            remote.cashAccountType == "SVGS" -> AccountType.SAVINGS
                             else -> AccountType.GIRO
                         },
                         iban = iban,
@@ -142,7 +153,31 @@ class BankSync(
             runCatching { api.deleteSession(row.sessionId) }
             db.bankSessions().delete(row)
         }
+        distinguishNames(renameAll = false)
         return syncAll()
+    }
+
+    /**
+     * Sorgt dafür, dass verbundene Konten unterscheidbare Namen tragen: mehrere gleichnamige Konten einer Bank
+     * (Haupt- und Unterkonten) bekommen die letzten IBAN-Stellen oder eine laufende Nummer.
+     * Mit [renameAll] werden auch die Namen ersetzt, die frühere Versionen aus dem Namen des Kontoinhabers gebildet haben.
+     */
+    private suspend fun distinguishNames(renameAll: Boolean) {
+        val connected = db.accounts().all().filter { it.connector == ConnectorType.ENABLE_BANKING }
+        val named = if (renameAll) connected.map { it.copy(name = it.institution) } else connected
+        for (group in named.groupBy { it.institution.lowercase() to it.name.lowercase() }.values) {
+            var counter = 0
+            for (account in group.sortedBy { it.id }) {
+                val name = when {
+                    group.size == 1 -> account.name
+                    account.iban.length >= 4 -> "${account.name} ••${account.iban.takeLast(4)}"
+                    else -> "${account.name} Unterkonto ${++counter}"
+                }
+                val type = if (account.institution.contains("paypal", ignoreCase = true)) AccountType.PAYPAL else account.type
+                val current = connected.first { it.id == account.id }
+                if (name != current.name || type != current.type) db.accounts().update(current.copy(name = name, type = type))
+            }
+        }
     }
 
     suspend fun disconnect(session: BankSessionEntity) {
@@ -156,6 +191,10 @@ class BankSync(
 
     /** Holt für alle verbundenen Konten Umsätze und Salden. Läuft nie doppelt gleichzeitig. */
     suspend fun syncAll(): SyncReport = mutex.withLock {
+        if (!credentials.onceDone(ONCE_ACCOUNT_NAMES)) {
+            distinguishNames(renameAll = true)
+            credentials.markDone(ONCE_ACCOUNT_NAMES)
+        }
         val now = Instant.now().epochSecond
         val sessions = db.bankSessions().all().associateBy { it.id }
         val accounts = db.accounts().all().filter { it.connector == ConnectorType.ENABLE_BANKING && it.externalId != null }
@@ -196,7 +235,12 @@ class BankSync(
             // Großzügig überlappen: Buchungen tauchen bei manchen Banken rückdatiert auf.
             Instant.ofEpochSecond(account.lastSync).atZone(ZoneOffset.UTC).toLocalDate().minusDays(14)
         }
-        val remote = api.transactions(uid, from.toString(), longest = firstSync)
+        val fields = java.util.TreeMap<String, Int>()
+        val remote = api.transactions(
+            uid, from.toString(), longest = firstSync,
+            inspect = if (diagnostics) { text -> runCatching { countFields(Json.parseToJsonElement(text), "", fields) } } else null,
+        )
+        if (diagnostics) Log.d("BankDiag", "${account.institution} #${account.id}: ${remote.size} Umsätze, Felder $fields")
         val seen = HashMap<String, Int>()
         val incoming = remote.mapNotNull { tx ->
             // Vorgemerkte Umsätze haben noch keine stabile Kennung und können sich ändern; es zählen die gebuchten.
@@ -234,6 +278,16 @@ class BankSync(
         return summary.inserted
     }
 
+    /** Zählt je Feldpfad, wie oft er einen nicht leeren Wert trägt. Inhalte werden nicht festgehalten. */
+    private fun countFields(element: JsonElement, path: String, into: MutableMap<String, Int>) {
+        when (element) {
+            is JsonObject -> element.forEach { (key, value) -> countFields(value, if (path.isEmpty()) key else "$path.$key", into) }
+            is JsonArray -> element.forEach { countFields(it, "$path[]", into) }
+            is JsonNull -> Unit
+            is JsonPrimitive -> if (element.content.isNotBlank()) into.merge(path, 1, Int::plus)
+        }
+    }
+
     /** Gebuchte Salden zuerst; „verfügbare" enthalten bei manchen Banken den Dispo-Rahmen. */
     private fun pickBalance(balances: List<Balance>): Long? {
         val order = listOf("CLBD", "ITBD", "XPCD", "ITAV", "CLAV", "OPBD", "PRCD")
@@ -245,6 +299,7 @@ class BankSync(
 
     companion object {
         private const val WORK_NAME = "bank-sync"
+        private const val ONCE_ACCOUNT_NAMES = "account_names_v2"
 
         /** Dreimal täglich im Hintergrund abrufen – Banken erlauben meist vier Abrufe ohne den Nutzer. */
         fun schedule(context: Context) {

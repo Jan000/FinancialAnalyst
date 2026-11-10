@@ -22,7 +22,11 @@ class AppContainer(context: Context) {
     val db: AppDatabase = AppDatabase.open(context)
     val repository = FinanceRepository(db)
     val settings = SettingsStore(context)
-    val bankSync = BankSync(db, repository, BankCredentials(context), afterChange = { afterTransactionsChanged() })
+    val bankSync = BankSync(
+        db, repository, BankCredentials(context),
+        afterChange = { afterTransactionsChanged() },
+        diagnostics = context.applicationInfo.flags and android.content.pm.ApplicationInfo.FLAG_DEBUGGABLE != 0,
+    )
     val backups = BackupManager(context, db, settings)
     val driveBackup = DriveBackup(context, backups)
     val notificationMapping = NotificationMapping(context)

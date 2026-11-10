@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <application>
+        <!-- Nur im Testbuild: Bankabruf per adb anstoßen, ohne die App-Sperre zu öffnen.
+             Die Berechtigung DUMP besitzt nur die adb-Shell, andere Apps können den Abruf nicht auslösen.
+             adb shell am broadcast -n net.jandev.financialanalyst/.debug.DebugSyncReceiver -->
+        <receiver
+            android:name=".debug.DebugSyncReceiver"
+            android:exported="true"
+            android:permission="android.permission.DUMP" />
+    </application>
+</manifest>

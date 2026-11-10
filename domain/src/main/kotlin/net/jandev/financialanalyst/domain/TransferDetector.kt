@@ -8,6 +8,8 @@ data class OwnAccount(
     val iban: String,
     /** Kleingeschriebene Wörter, an denen das Konto in einem Buchungstext erkennbar ist (Bank, Kontoname). */
     val hints: List<String>,
+    /** Konten derselben Bankverbindung (Haupt- und Unterkonten) tragen dieselbe Gruppe. */
+    val group: Long? = null,
 )
 
 data class TransferCandidate(
@@ -26,6 +28,7 @@ data class TransferCandidate(
  */
 object TransferDetector {
     const val MAX_DAYS_APART = 4L
+    const val WALLET_DAYS_APART = 5L
     private val keywords = listOf(
         "umbuchung", "übertrag", "uebertrag", "eigenes konto", "kreditkartenabrechnung", "kartenabrechnung",
         "einzahlung", "auszahlung", "aufladung", "top-up", "top up", "guthaben", "sparen",
@@ -57,10 +60,45 @@ object TransferDetector {
         // Der Ausgang nennt das Zielkonto oder der Eingang das Quellkonto.
         if (to != null && mentions(outText, to)) return true
         if (from != null && mentions(inText, from)) return true
+        // Verschiebungen zwischen Haupt- und Unterkonto derselben Bank nennen keine Gegenpartei.
+        if (from?.group != null && from.group == to?.group && out.counterparty.isBlank() && incoming.counterparty.isBlank()) return true
         // Eigene Überweisungen tragen auf beiden Seiten denselben Namen (den des Kontoinhabers).
         val a = out.counterparty.trim().lowercase()
         if (a.length >= 4 && a == incoming.counterparty.trim().lowercase()) return true
         return keywords.any { it in outText || it in inText }
+    }
+
+    /**
+     * Käufe über ein Zahlungskonto wie PayPal erscheinen zweimal: dort mit dem Händler und auf dem Bankkonto
+     * als Abbuchung des Zahlungsdienstes über denselben Betrag. Liefert zu jeder solchen Abbuchung (oder
+     * Erstattung) den Umsatz auf dem Zahlungskonto, damit die Bankseite nur noch als Umbuchung zählt.
+     *
+     * @param wallets Zahlungskonto → kleingeschriebener Name des Dienstes, wie er im Bankumsatz steht ("paypal")
+     * @param taken Umsätze auf Zahlungskonten, die schon einer Bankbuchung zugeordnet sind
+     * @return Paare (Bankumsatz, Umsatz auf dem Zahlungskonto)
+     */
+    fun detectWalletFunding(
+        wallets: Map<Long, String>,
+        candidates: List<TransferCandidate>,
+        taken: Set<Long> = emptySet(),
+    ): List<Pair<Long, Long>> {
+        if (wallets.isEmpty()) return emptyList()
+        val used = HashSet(taken)
+        val pairs = ArrayList<Pair<Long, Long>>()
+        val walletSide = candidates.filter { it.accountId in wallets }.groupBy { it.amountCents }
+        for (bank in candidates.filter { it.accountId !in wallets }.sortedBy { it.date }) {
+            val text = "${bank.counterparty} ${bank.purpose}".lowercase()
+            val match = walletSide[bank.amountCents].orEmpty()
+                .asSequence()
+                .filter { it.id !in used && text.contains(wallets.getValue(it.accountId)) }
+                // Die Bank bucht meist am selben Tag oder wenige Tage später.
+                .filter { abs(it.date.toEpochDay() - bank.date.toEpochDay()) <= WALLET_DAYS_APART }
+                .minByOrNull { abs(it.date.toEpochDay() - bank.date.toEpochDay()) }
+                ?: continue
+            used.add(match.id)
+            pairs.add(bank.id to match.id)
+        }
+        return pairs
     }
 
     private fun mentions(text: String, account: OwnAccount): Boolean {

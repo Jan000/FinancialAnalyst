@@ -61,6 +61,11 @@ class BankCredentials(context: Context) {
         state.value = read()
     }
 
+    /** Merker für einmalige Nacharbeiten an den abgerufenen Daten. */
+    fun onceDone(name: String): Boolean = prefs.getBoolean("once_$name", false)
+
+    fun markDone(name: String) = prefs.edit().putBoolean("once_$name", true).apply()
+
     fun clear() {
         prefs.edit().remove(KEY_PEM).remove(KEY_IV).remove(KEY_APP_ID).remove(KEY_PENDING).apply()
         cachedKey = null

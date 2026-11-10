@@ -78,9 +78,25 @@ Ohne Google-Einrichtung funktioniert die Sicherung als Datei (**Datei speichern 
 Im Emulator durchgespielt: Konten und Umsätze anlegen, CSV-Import, Analyse, Fixkosten, Budget, Kredite, Budgets je
 Kategorie, Sicherung als Datei mit Wiederherstellung, App-Sperre.
 
+Der Bankabruf über Enable Banking läuft auf einem echten Gerät mit N26, Trade Republic und PayPal. Dabei aufgefallen
+und berücksichtigt:
+
+- Trade Republic liefert nur Datum und Betrag, keinen Buchungstext. Solche Zahlungen werden an Konto und Betrag
+  wiedererkannt, sobald eine davon von Hand eine Kategorie bekommt.
+- Käufe über PayPal stehen bei PayPal und noch einmal als Abbuchung auf dem Bankkonto. Die Bankseite zählt als
+  Umbuchung, wenn sich der passende PayPal-Umsatz findet.
+- Unterkonten (N26 Spaces) kommen als eigene Konten ohne IBAN.
+
+Im Testbuild lässt sich ein Abruf per adb anstoßen, ohne die App-Sperre zu öffnen; das Log `BankDiag` nennt dabei je
+Konto, welche Felder die Bank liefert (nur Feldnamen und Anzahl, keine Inhalte):
+
+```
+adb shell am broadcast -n net.jandev.financialanalyst/.debug.DebugSyncReceiver
+adb logcat -d -s BankDiag:D
+```
+
 Noch nicht gegen echte Gegenstellen geprüft, weil dafür persönliche Zugänge nötig sind:
 
-- Bankabruf gegen Enable Banking (der Client ist gegen einen Mock-Server mit Beispielantworten aus der Dokumentation getestet).
 - Upload und Download bei Google Drive.
 - Das Mitlesen der Benachrichtigungen echter Banking-Apps; deren Wortlaute können vom Parser abweichen.
 - Die CSV-Formate sind nach dem bekannten Aufbau der Exporte gebaut und mit erfundenen Dateien getestet, nicht mit echten.
@@ -91,5 +107,6 @@ Echte Kontoauszüge, Schlüsseldateien und Exporte gehören nicht ins Repo (`.gi
 
 - Digitale Kassenbons (Lidl, REWE, Netto) – bewusst zurückgestellt.
 - Automatischer Abruf für Trade Republic, falls dort kein PSD2-Zugang verfügbar ist.
-- Datenbank-Migrationen: Das Schema steht noch auf Version 1; vor einer Schemaänderung nach dem ersten echten Einsatz
-  muss eine Migration geschrieben werden.
+- Datenbank-Migrationen: Das Schema steht noch auf Version 1 und die App ist inzwischen mit echten Daten im Einsatz;
+  jede Schemaänderung braucht ab jetzt eine Migration.
+- Kredite rechnen nach Plan ab dem Datum der ersten Rate; ein Abgleich mit den tatsächlich gebuchten Raten fehlt.

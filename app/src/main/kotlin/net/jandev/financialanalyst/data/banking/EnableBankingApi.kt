@@ -143,6 +143,7 @@ class EnableBankingApi(
         query: Map<String, String?> = emptyMap(),
         method: String = "GET",
         body: String? = null,
+        noinline inspect: ((String) -> Unit)? = null,
     ): T = withContext(Dispatchers.IO) {
         val url = (baseUrl + path).toHttpUrl().newBuilder().apply {
             query.forEach { (key, value) -> if (value != null) addQueryParameter(key, value) }
@@ -158,6 +159,7 @@ class EnableBankingApi(
                 val error = runCatching { json.decodeFromString<ApiError>(text) }.getOrNull()
                 throw BankApiException(error?.error, response.code, describe(error?.error, response.code, error?.message))
             }
+            inspect?.invoke(text)
             json.decodeFromString<T>(text)
         }
     }
@@ -196,7 +198,13 @@ class EnableBankingApi(
     suspend fun balances(accountUid: String): List<Balance> = call<BalanceList>("/accounts/$accountUid/balances").balances
 
     /** Lädt alle Seiten. [longest] holt beim ersten Abruf so viel Historie, wie die Bank hergibt. */
-    suspend fun transactions(accountUid: String, dateFrom: String, longest: Boolean): List<BankTransaction> {
+    suspend fun transactions(
+        accountUid: String,
+        dateFrom: String,
+        longest: Boolean,
+        /** Bekommt jede Antwortseite unverändert, für die Diagnose der gelieferten Felder. */
+        inspect: ((String) -> Unit)? = null,
+    ): List<BankTransaction> {
         val all = ArrayList<BankTransaction>()
         var key: String? = null
         var pages = 0
@@ -208,6 +216,7 @@ class EnableBankingApi(
                     "strategy" to if (longest) "longest" else null,
                     "continuation_key" to key,
                 ),
+                inspect = inspect,
             )
             all.addAll(page.transactions)
             key = page.continuationKey

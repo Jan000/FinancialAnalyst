@@ -14,6 +14,7 @@ import net.jandev.financialanalyst.data.db.LoanEntity
 import net.jandev.financialanalyst.data.db.LoanExtraPaymentEntity
 import net.jandev.financialanalyst.data.db.RecurringEntity
 import net.jandev.financialanalyst.data.db.TransactionEntity
+import net.jandev.financialanalyst.domain.AccountType
 import net.jandev.financialanalyst.domain.CategoryKind
 import net.jandev.financialanalyst.domain.CategoryRule
 import net.jandev.financialanalyst.domain.Categorizer
@@ -42,7 +43,17 @@ class FinanceRepository(private val db: AppDatabase) {
     /** Legt beim ersten Start die mitgelieferten Kategorien und Zuordnungsregeln an. */
     suspend fun seedDefaults() {
         db.withTransaction {
-            if (db.categories().count() > 0) return@withTransaction
+            if (db.categories().count() > 0) {
+                // Schon eingerichtet: nur Schlagwörter nachtragen, die mit einem Update dazugekommen sind.
+                val known = db.categories().rules().filter { !it.userDefined }.map { it.categoryId to it.pattern }.toSet()
+                val idByKey = db.categories().all().mapNotNull { c -> c.builtinKey?.let { it to c.id } }.toMap()
+                val missing = DefaultCategories.all.flatMap { template ->
+                    val id = idByKey[template.key] ?: return@flatMap emptyList()
+                    template.keywords.filter { (id to it) !in known }.map { CategoryRuleEntity(pattern = it, categoryId = id) }
+                }
+                if (missing.isNotEmpty()) db.categories().insertRules(missing)
+                return@withTransaction
+            }
             DefaultCategories.all.forEachIndexed { index, template ->
                 val id = db.categories().insert(
                     CategoryEntity(
@@ -112,15 +123,17 @@ class FinanceRepository(private val db: AppDatabase) {
 
         for (tx in all) {
             if (tx.categoryId != null || tx.categoryLocked) continue
-            val category = categorizer.categorize(tx.counterparty, tx.purpose, tx.amountCents) ?: continue
+            val category = categorizer.categorize(tx.counterparty, tx.purpose, tx.amountCents, tx.accountId) ?: continue
             changed[tx.id] = tx.copy(categoryId = category)
         }
 
-        val accounts = db.accounts().all().map { account ->
+        val accountRows = db.accounts().all()
+        val accounts = accountRows.map { account ->
             OwnAccount(
                 id = account.id,
                 iban = account.iban,
                 hints = listOf(account.institution, account.name).map { it.trim().lowercase() }.filter { it.length >= 3 },
+                group = account.sessionId,
             )
         }
         if (accounts.size >= 2) {
@@ -138,23 +151,52 @@ class FinanceRepository(private val db: AppDatabase) {
                 }
             }
         }
+        // Käufe über PayPal stehen dort mit Händler und auf dem Bankkonto noch einmal als Abbuchung:
+        // die Bankseite wird zur Umbuchung, sonst zählte jeder Kauf doppelt.
+        val wallets = accountRows.filter { it.type == AccountType.PAYPAL || it.institution.contains("paypal", ignoreCase = true) }
+            .associate { it.id to "paypal" }
+        if (wallets.isNotEmpty()) {
+            val current = all.map { changed[it.id] ?: it }
+            val taken = current.filter { it.accountId !in wallets }.mapNotNull { it.transferPeerId }.toSet()
+            val candidates = current.filter { it.transferPeerId == null }.map {
+                TransferCandidate(it.id, it.accountId, it.bookingDate, it.amountCents, it.counterparty, it.purpose)
+            }
+            val byId = current.associateBy { it.id }
+            for ((bankId, walletId) in TransferDetector.detectWalletFunding(wallets, candidates, taken)) {
+                val tx = byId[bankId] ?: continue
+                // Bewusst einseitig: der Umsatz auf dem Zahlungskonto bleibt die eigentliche Ausgabe.
+                changed[bankId] = tx.copy(
+                    transferPeerId = walletId,
+                    categoryId = if (tx.categoryLocked) tx.categoryId else transferCategory ?: tx.categoryId,
+                )
+            }
+        }
         if (changed.isNotEmpty()) db.transactions().updateAll(changed.values.toList())
     }
 
     /**
-     * Merkt sich eine von Hand gewählte Kategorie für diesen Händler und wendet sie auf dessen
-     * übrige, nicht von Hand zugeordnete Umsätze an.
+     * Merkt sich eine von Hand gewählte Kategorie für „dieselbe Zahlung" (Händler, sonst Verwendungszweck,
+     * sonst Konto und Betrag): alle bisherigen gleichen Umsätze bekommen sie sofort, künftige beim Eingang,
+     * und ein passender Dauerposten übernimmt sie ebenfalls.
      */
-    suspend fun learnCategory(counterparty: String, categoryId: Long) = db.withTransaction {
-        val key = Categorizer.merchantKey(counterparty)
-        if (key.length < 3) return@withTransaction
+    suspend fun learnCategory(tx: TransactionEntity, categoryId: Long) =
+        learnCategory(Categorizer.learnKey(tx.counterparty, tx.purpose, tx.accountId, tx.amountCents), categoryId, sign = null)
+
+    /** [sign] beschränkt die Übernahme auf Ausgänge (−1) oder Eingänge (+1). */
+    private suspend fun learnCategory(key: String, categoryId: Long, sign: Int?) = db.withTransaction {
         db.categories().deleteUserRule(key)
         db.categories().insertRules(listOf(CategoryRuleEntity(pattern = key, categoryId = categoryId, userDefined = true)))
         val affected = db.transactions().all().filter {
             !it.categoryLocked && it.categoryId != categoryId && it.transferPeerId == null &&
-                Categorizer.merchantKey(it.counterparty) == key
+                (sign == null || (it.amountCents < 0) == (sign < 0)) &&
+                Categorizer.learnKey(it.counterparty, it.purpose, it.accountId, it.amountCents) == key
         }
         if (affected.isNotEmpty()) db.transactions().updateAll(affected.map { it.copy(categoryId = categoryId) })
+        val items = db.recurring().all().filter {
+            it.categoryId != categoryId && it.matchKey.substringBeforeLast('|') == key &&
+                (sign == null || it.matchKey.endsWith(if (sign < 0) "|-" else "|+"))
+        }
+        if (items.isNotEmpty()) db.recurring().updateAll(items.map { it.copy(categoryId = categoryId) })
     }
 
     val recurring: Flow<List<RecurringEntity>> = db.recurring().observeAll()
@@ -189,10 +231,21 @@ class FinanceRepository(private val db: AppDatabase) {
 
     suspend fun recurringItem(id: Long): RecurringEntity? = db.recurring().byId(id)
 
-    suspend fun saveRecurring(item: RecurringEntity): Long = db.recurring().upsert(
+    /**
+     * Speichert einen Dauerposten. Seine Kategorie gilt danach auch für alle bisherigen und künftigen
+     * Umsätze dieser Zahlung.
+     */
+    suspend fun saveRecurring(item: RecurringEntity): Long = db.withTransaction {
         // Von Hand angelegte Posten bekommen den Schlüssel aus ihrem Namen, damit passende Umsätze sie fortschreiben.
-        if (item.detected) item else item.copy(matchKey = RecurringDetector.matchKey(item.name, item.amountCents)),
-    )
+        val keyed = if (item.detected) item else item.copy(matchKey = RecurringDetector.matchKey(item.name, item.amountCents))
+        val id = db.recurring().upsert(keyed)
+        val category = keyed.categoryId
+        val key = keyed.matchKey.substringBeforeLast('|')
+        if (category != null && key.isNotBlank()) {
+            learnCategory(key, category, sign = if (keyed.matchKey.endsWith("|-")) -1 else 1)
+        }
+        id
+    }
 
     suspend fun deleteRecurring(item: RecurringEntity) = db.withTransaction {
         if (item.detected) {
@@ -243,13 +296,21 @@ class FinanceRepository(private val db: AppDatabase) {
             }
         }
 
-        val latestByKey = txs.groupBy { RecurringDetector.matchKey(it.counterparty, it.amountCents) }
+        val latestByKey = txs.groupBy { RecurringDetector.matchKey(it) }
             .mapValues { entry -> entry.value.maxOf { it.date } }
         for (old in existing) {
             if (old.matchKey in detected || old.dismissed) continue
+            if (old.detected && old.matchKey !in latestByKey) {
+                // Kein einziger Umsatz trägt den Posten mehr (etwa weil die Buchungen als Umbuchung erkannt wurden).
+                db.recurring().delete(old)
+                continue
+            }
             if (old.detected) {
                 // Nicht mehr erkannt und deutlich überfällig: läuft offenbar nicht mehr.
-                if (old.active && old.nextDue.plusDays(45) < today) db.recurring().upsert(old.copy(active = false))
+                // Ebenso, wenn die letzten Buchungen inzwischen als Umbuchung zählen und der Rest lange zurückliegt.
+                val latest = latestByKey.getValue(old.matchKey)
+                val stale = old.nextDue.plusDays(45) < today || old.interval.next(latest).plusDays(10) < today
+                if (old.active && stale) db.recurring().upsert(old.copy(active = false))
                 continue
             }
             // Von Hand angelegt: Termin weiterschieben, sobald die passende Buchung da ist.

@@ -36,11 +36,15 @@ object RecurringDetector {
     fun matchKey(counterparty: String, amountCents: Long): String =
         "${Categorizer.merchantKey(counterparty)}|${if (amountCents < 0) "-" else "+"}"
 
+    /** Schlüssel eines Umsatzes; ohne Händler zählt der Verwendungszweck, ohne jeden Text Konto und Betrag. */
+    fun matchKey(tx: Tx): String =
+        "${Categorizer.learnKey(tx.counterparty, tx.purpose, tx.accountId, tx.amountCents)}|${if (tx.amountCents < 0) "-" else "+"}"
+
     fun detect(transactions: List<Tx>, today: LocalDate): List<DetectedRecurring> {
         val result = ArrayList<DetectedRecurring>()
         val groups = transactions
-            .filter { !it.isTransfer && it.amountCents != 0L && Categorizer.merchantKey(it.counterparty).length >= 3 }
-            .groupBy { matchKey(it.counterparty, it.amountCents) }
+            .filter { !it.isTransfer && it.amountCents != 0L }
+            .groupBy { matchKey(it) }
 
         for ((key, group) in groups) {
             if (group.size < 2) continue
@@ -96,7 +100,7 @@ object RecurringDetector {
         val previous = before?.amountCents?.takeIf { it != last.amountCents }
         return DetectedRecurring(
             matchKey = key,
-            name = last.counterparty.trim(),
+            name = last.counterparty.trim().ifEmpty { last.purpose.trim() }.ifEmpty { "Zahlung ohne Buchungstext" },
             amountCents = last.amountCents,
             interval = cls.interval,
             lastDate = last.date,

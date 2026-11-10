@@ -347,7 +347,7 @@ fun TransactionEditScreen(transactionId: Long, onDone: () -> Unit) {
                         app.repository.saveTransaction(tx)
                         val chosen = tx.categoryId
                         if (chosen != null && chosen != base.categoryId) {
-                            app.repository.learnCategory(tx.counterparty, chosen)
+                            app.repository.learnCategory(tx, chosen)
                         }
                         app.afterTransactionsChanged()
                         onDone()

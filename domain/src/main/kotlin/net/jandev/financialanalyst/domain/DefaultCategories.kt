@@ -20,14 +20,14 @@ object DefaultCategories {
             listOf(
                 "rewe", "lidl", "aldi", "edeka", "netto", "penny", "kaufland", "norma", "tegut", "globus",
                 "denns", "alnatura", "nahkauf", "marktkauf", "famila", "hit markt", "bäckerei", "baeckerei", "metzgerei",
-                "flink", "picnic",
+                "flink", "picnic", "e center", "e-center", "flaschenpost", "spar dankt",
             ),
         ),
         CategoryTemplate(
             "restaurant", "Restaurant & Lieferdienst", CategoryKind.EXPENSE,
             listOf(
                 "lieferando", "wolt", "uber eats", "mcdonald", "burger king", "kfc", "subway", "starbucks",
-                "restaurant", "pizzeria", "pizza", "döner", "doener", "sushi", "cafe ", "café", "imbiss", "bistro", "dominos",
+                "restaurant", "pizzeria", "pizza", "döner", "doener", "sushi", "cafe ", "café", "imbiss", "bistro", "dominos", "kebap", "kebab", "takeaway.com", "amrest",
             ),
         ),
         CategoryTemplate(
@@ -38,7 +38,7 @@ object DefaultCategories {
             "utilities", "Nebenkosten & Energie", CategoryKind.EXPENSE,
             listOf(
                 "stadtwerke", "strom", "eon ", "e.on", "vattenfall", "enbw", "rwe", "gasag", "abschlag", "nebenkosten",
-                "rundfunk", "beitragsservice", "abfall", "wasserwerk", "octopus energy", "tibber", "yello",
+                "rundfunk", "beitragsservice", "abfall", "wasserwerk", "octopus energy", "tibber", "yello", "bs/energy",
             ),
         ),
         CategoryTemplate(
@@ -46,7 +46,7 @@ object DefaultCategories {
             listOf(
                 "aral", "shell", "esso", "total energies", "totalenergies", "jet tank", "tankstelle", "star tank", "avia", "agip",
                 "hem tank", "kfz", "werkstatt", "atu ", "a.t.u", "tüv", "tuev", "dekra", "parkhaus", "parken", "easypark",
-                "ionity", "enbw mobility",
+                "ionity", "enbw mobility", " star ", "oil ", "total service station", "raiwa", "automobiltechnik",
             ),
         ),
         CategoryTemplate(
@@ -69,14 +69,14 @@ object DefaultCategories {
             listOf(
                 "netflix", "spotify", "disney", "amazon prime", "prime video", "youtube", "apple.com/bill", "google play",
                 "audible", "dazn", "sky ", "wow tv", "rtl+", "joyn", "icloud", "microsoft", "adobe", "openai", "anthropic",
-                "github", "dropbox", "nintendo", "playstation", "steam", "xbox", "kindle", "zeit online", "spiegel",
+                "github", "dropbox", "nintendo", "playstation", "steam", "xbox", "kindle", "zeit online", "spiegel", "google payment",
             ),
         ),
         CategoryTemplate(
             "telecom", "Telefon & Internet", CategoryKind.EXPENSE,
             listOf(
                 "telekom", "vodafone", "o2 ", "telefonica", "1&1", "1und1", "congstar", "aldi talk", "freenet", "klarmobil",
-                "drillisch", "winsim", "fraenk", "pyur", "unitymedia", "netcologne",
+                "drillisch", "winsim", "fraenk", "pyur", "unitymedia", "netcologne", "netcup", "strato", "ionos",
             ),
         ),
         CategoryTemplate(
@@ -84,7 +84,7 @@ object DefaultCategories {
             listOf(
                 "amazon", "amzn", "zalando", "otto ", "ebay", "kleinanzeigen", "mediamarkt", "media markt", "saturn",
                 "h&m", "h & m", "zara", "c&a", "decathlon", "tchibo", "about you", "temu", "shein", "aliexpress", "etsy",
-                "thalia", "galeria", "primark", "uniqlo", "action ", "tedi", "woolworth",
+                "thalia", "galeria", "primark", "uniqlo", "action ", "tedi", "woolworth", "mms e-commerce", "flaconi", "momox", "thomas philipps",
             ),
         ),
         CategoryTemplate(
@@ -98,7 +98,7 @@ object DefaultCategories {
             "leisure", "Freizeit & Sport", CategoryKind.EXPENSE,
             listOf(
                 "fitness", "mcfit", "fitx", "urban sports", "clever fit", "kino", "cinemaxx", "cinestar", "uci ", "eventim",
-                "ticketmaster", "theater", "museum", "schwimmbad", "verein", "konzert", "bowling", "zoo",
+                "ticketmaster", "theater", "museum", "schwimmbad", "verein", "konzert", "bowling", "zoo", "cinema", "tipico", "epic games",
             ),
         ),
         CategoryTemplate(
@@ -107,11 +107,11 @@ object DefaultCategories {
         ),
         CategoryTemplate(
             "loans", "Kredite & Zinsen", CategoryKind.EXPENSE,
-            listOf("darlehen", "kreditrate", "tilgung", "ratenkredit", "sollzinsen", "dispozins", "kfw", "bafög", "bafoeg", "klarna", "ratenzahlung", "santander consumer", "targobank"),
+            listOf("darlehen", "kreditrate", "tilgung", "ratenkredit", "sollzinsen", "dispozins", "kfw", "bafög", "bafoeg", "klarna", "ratenzahlung", "santander consumer", "targobank", "zinia", "überziehungszinsen", "dispokredit"),
         ),
         CategoryTemplate(
             "fees", "Gebühren & Steuern", CategoryKind.EXPENSE,
-            listOf("kontoführung", "kontofuehrung", "entgelt", "gebühr", "gebuehr", "finanzamt", "steuer", "bundeskasse", "zoll", "bußgeld", "bussgeld", "jahresbeitrag karte"),
+            listOf("kontoführung", "kontofuehrung", "entgelt", "gebühr", "gebuehr", "finanzamt", "steuer", "bundeskasse", "zoll", "bußgeld", "bussgeld", "jahresbeitrag karte", "stadtkasse"),
         ),
         CategoryTemplate(
             "cash", "Bargeld", CategoryKind.EXPENSE,
@@ -143,7 +143,7 @@ object DefaultCategories {
 
         CategoryTemplate(
             KEY_TRANSFER, "Umbuchung", CategoryKind.TRANSFER,
-            listOf("umbuchung", "übertrag", "uebertrag", "eigenes konto", "kreditkartenabrechnung", "ausgleich kreditkarte"),
+            listOf("umbuchung", "übertrag", "uebertrag", "eigenes konto", "kreditkartenabrechnung", "ausgleich kreditkarte", "einkommensverteiler", "nach hauptkonto", "von hauptkonto nach"),
         ),
     )
 }
