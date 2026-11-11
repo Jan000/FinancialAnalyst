@@ -1,6 +1,8 @@
 package net.jandev.financialanalyst.domain
 
 import java.time.LocalDate
+import java.time.YearMonth
+import java.time.temporal.ChronoUnit
 import kotlin.math.abs
 
 data class DetectedRecurring(
@@ -61,6 +63,18 @@ object RecurringDetector {
         return result.sortedBy { it.nextDue }
     }
 
+    /**
+     * Mindestens drei Buchungen in aufeinanderfolgenden Kalendermonaten, je Monat genau eine; höchstens ein Monat
+     * darf fehlen. So wird eine Monatszahlung auch dann erkannt, wenn der Buchungstag stark schwankt.
+     */
+    private fun byCalendarMonth(dates: List<LocalDate>): Boolean {
+        if (dates.size < 3) return false
+        val months = dates.map { YearMonth.from(it) }
+        if (months.distinct().size != months.size) return false
+        val steps = months.zipWithNext { a, b -> ChronoUnit.MONTHS.between(a, b) }
+        return steps.all { it in 1..2 } && steps.count { it == 2L } <= 1
+    }
+
     private fun clusterByAmount(sorted: List<Tx>): List<List<Tx>> {
         val clusters = ArrayList<MutableList<Tx>>()
         for (tx in sorted) {
@@ -79,11 +93,29 @@ object RecurringDetector {
         if (dates.size < 2) return null
         val gaps = dates.zipWithNext { a, b -> b.toEpochDay() - a.toEpochDay() }
         val median = gaps.sorted()[gaps.size / 2]
-        val cls = classes.firstOrNull { median in it.minDays..it.maxDays } ?: return null
-        if (dates.size < cls.minOccurrences) return null
+        val cls = classes.firstOrNull { median in it.minDays..it.maxDays }
         // Ein ausgelassener Termin (doppelter Abstand) ist erlaubt, sonst müssen die Abstände passen.
-        val fitting = gaps.count { it in cls.minDays..cls.maxDays || it in cls.minDays * 2..cls.maxDays * 2 }
-        if (fitting < gaps.size * 0.75) return null
+        val regular = cls != null && dates.size >= cls.minOccurrences &&
+            gaps.count { it in cls.minDays..cls.maxDays || it in cls.minDays * 2..cls.maxDays * 2 } >= gaps.size * 0.75
+        val interval: RecurrenceInterval
+        val nextDue: LocalDate
+        val graceDays: Long
+        when {
+            regular -> {
+                interval = cls!!.interval
+                nextDue = interval.next(sorted.last().date)
+                graceDays = maxOf(10L, cls.maxDays / 2)
+            }
+            byCalendarMonth(dates) -> {
+                // Miete & Co.: mal am Monatsanfang, mal mitten im Monat, aber jeden Monat genau einmal.
+                interval = RecurrenceInterval.MONTHLY
+                val day = dates.map { it.dayOfMonth }.sorted()[dates.size / 2]
+                val month = YearMonth.from(dates.last()).plusMonths(1)
+                nextDue = month.atDay(minOf(day, month.lengthOfMonth()))
+                graceDays = 17
+            }
+            else -> return null
+        }
 
         val amounts = sorted.map { abs(it.amountCents) }
         val medianAmount = amounts.sorted()[amounts.size / 2]
@@ -91,10 +123,8 @@ object RecurringDetector {
         if (similar < amounts.size * 0.75) return null
 
         val last = sorted.last()
-        val nextDue = cls.interval.next(last.date)
         // Seit mehr als einem halben Intervall überfällig: der Posten läuft vermutlich nicht mehr.
-        val graceDays = maxOf(10, (cls.maxDays / 2).toInt())
-        if (nextDue.plusDays(graceDays.toLong()) < today) return null
+        if (nextDue.plusDays(graceDays) < today) return null
 
         val before = sorted.dropLast(1).lastOrNull { it.date != last.date }
         val previous = before?.amountCents?.takeIf { it != last.amountCents }
@@ -102,7 +132,7 @@ object RecurringDetector {
             matchKey = key,
             name = last.counterparty.trim().ifEmpty { last.purpose.trim() }.ifEmpty { "Zahlung ohne Buchungstext" },
             amountCents = last.amountCents,
-            interval = cls.interval,
+            interval = interval,
             lastDate = last.date,
             nextDue = nextDue,
             previousAmountCents = previous,

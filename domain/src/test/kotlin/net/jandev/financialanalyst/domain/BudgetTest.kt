@@ -41,6 +41,19 @@ class BudgetTest {
     }
 
     @Test
+    fun detectsMonthlyPaymentWithShiftingBookingDay() {
+        // Miete ohne Buchungstext, einmal mitten im Monat statt am Ersten: die Abstände (46, 15 Tage) passen zu keinem Rhythmus.
+        val rent = listOf(LocalDate.of(2026, 9, 1), LocalDate.of(2026, 10, 17), LocalDate.of(2026, 11, 1))
+            .mapIndexed { i, date -> Tx(700L + i, 6, date, -77500, "") }
+        val item = RecurringDetector.detect(rent, today).single()
+        assertEquals(RecurrenceInterval.MONTHLY, item.interval)
+        assertEquals(LocalDate.of(2026, 12, 1), item.nextDue)
+        // Zwei Buchungen in einem Monat sind kein Monatsrhythmus.
+        val twiceInOctober = rent + Tx(710, 6, LocalDate.of(2026, 10, 2), -77500, "")
+        assertTrue(RecurringDetector.detect(twiceInOctober, today).none { it.interval == RecurrenceInterval.MONTHLY && it.occurrences == 4 })
+    }
+
+    @Test
     fun ignoresEndedSubscriptionsAndTooFewOccurrences() {
         val ended = monthly("Altes Abo", -500, 4, 5, last = LocalDate.of(2026, 6, 5))
         val twice = monthly("Zweimal", -500, 2, 5)

@@ -83,6 +83,20 @@ class FinanceRepository(
         }
     }
 
+    /** Legt eine Kategorie an oder ändert sie; liefert die ID. */
+    suspend fun saveCategory(category: CategoryEntity): Long =
+        if (category.id == 0L) db.categories().insert(category) else category.id.also { db.categories().update(category) }
+
+    /** Entfernt eine Kategorie; ihre Umsätze und Dauerposten stehen danach ohne Kategorie da und werden neu zugeordnet. */
+    suspend fun deleteCategory(category: CategoryEntity) = db.withTransaction {
+        db.transactions().clearCategory(category.id)
+        db.recurring().clearCategory(category.id)
+        db.planning().deleteBudget(category.id)
+        db.rules().deleteOfCategory(category.id)
+        db.categories().deleteRulesOf(category.id)
+        db.categories().delete(category)
+    }
+
     suspend fun account(id: Long): AccountEntity? = db.accounts().byId(id)
 
     suspend fun accountWithBalance(id: Long): AccountWithBalance? = db.accounts().withBalance(id)
@@ -312,9 +326,14 @@ class FinanceRepository(
      * Umsätze dieser Zahlung.
      */
     suspend fun saveRecurring(item: RecurringEntity): Long = db.withTransaction {
-        // Von Hand angelegte Posten bekommen den Schlüssel aus ihrem Namen, damit passende Umsätze sie fortschreiben.
-        val keyed = if (item.detected) item else item.copy(matchKey = RecurringDetector.matchKey(item.name, item.amountCents))
-        val id = db.recurring().upsert(keyed)
+        // Von Hand angelegte Posten bekommen den Schlüssel aus ihrem Namen, damit passende Umsätze sie fortschreiben;
+        // aus Buchungen angelegte bringen den Schlüssel dieser Buchungen schon mit.
+        val withKey = if (item.detected || item.matchKey.isNotBlank()) item else item.copy(matchKey = RecurringDetector.matchKey(item.name, item.amountCents))
+        // Gibt es für diese Zahlung schon einen Posten (etwa einen erkannten), wird er übernommen statt verdoppelt.
+        val twin = if (withKey.id == 0L) db.recurring().all().firstOrNull { it.matchKey == withKey.matchKey } else null
+        val keyed = if (twin != null) withKey.copy(id = twin.id, detected = false, dismissed = false) else withKey
+        val inserted = db.recurring().upsert(keyed)
+        val id = if (keyed.id == 0L) inserted else keyed.id
         val category = keyed.categoryId
         val key = keyed.matchKey.substringBeforeLast('|')
         if (category != null && key.isNotBlank()) {

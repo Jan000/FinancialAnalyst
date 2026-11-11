@@ -11,6 +11,7 @@ import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
@@ -24,6 +25,7 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.SegmentedButton
 import androidx.compose.material3.SegmentedButtonDefaults
@@ -86,6 +88,9 @@ fun TransactionsScreen(onEdit: (Long) -> Unit, onAddAccount: () -> Unit, onOpenR
     val categories by app.repository.categories.collectAsStateWithLifecycle(initialValue = emptyList())
     var query by rememberSaveable { mutableStateOf("") }
     var pickingId by rememberSaveable { mutableStateOf<Long?>(null) }
+    val listState = rememberLazyListState()
+    // Für welche Suche die Liste schon auf die jüngste echte Buchung gerückt wurde; überlebt den Wechsel in ein Detail.
+    var positionedFor by rememberSaveable { mutableStateOf<String?>(null) }
 
     val accountNames = remember(accounts) { accounts.associate { it.account.id to it.account.name } }
     val categoryNames = remember(categories) { categories.associate { it.id to it.name } }
@@ -186,6 +191,23 @@ fun TransactionsScreen(onEdit: (Long) -> Unit, onAddAccount: () -> Unit, onOpenR
             entries.groupBy { entry -> entry.maxOf { it.bookingDate } }.toList().sortedByDescending { it.first }
         }
 
+        // Oben stehen die erwarteten Buchungen der nächsten Wochen; geöffnet wird bei der jüngsten echten Buchung.
+        val firstPastIndex = remember(grouped, today) {
+            var index = 0
+            for ((date, entries) in grouped) {
+                // Ein Tag, an dem nur Erwartetes steht (etwa ein überfälliger Posten), zählt noch zur Zukunft.
+                if (date <= today && entries.any { entry -> entry.any { it.id > 0 } }) return@remember index
+                index += 1 + entries.size
+            }
+            0
+        }
+        LaunchedEffect(query, grouped.isNotEmpty()) {
+            if (grouped.isNotEmpty() && positionedFor != query) {
+                listState.scrollToItem(firstPastIndex)
+                positionedFor = query
+            }
+        }
+
         Column(Modifier.fillMaxSize().padding(padding)) {
             OutlinedTextField(
                 value = query,
@@ -212,7 +234,7 @@ fun TransactionsScreen(onEdit: (Long) -> Unit, onAddAccount: () -> Unit, onOpenR
                     },
                 )
             } else {
-                LazyColumn(contentPadding = PaddingValues(bottom = 96.dp)) {
+                LazyColumn(state = listState, contentPadding = PaddingValues(bottom = 96.dp)) {
                     grouped.forEach { (date, entries) ->
                         item(key = "h${date.toEpochDay()}") {
                             // Bis heute zählt, was gebucht ist; an künftigen Tagen, was erwartet wird.
@@ -380,7 +402,7 @@ fun TransactionRow(
 }
 
 @Composable
-fun TransactionEditScreen(transactionId: Long, onDone: () -> Unit) {
+fun TransactionEditScreen(transactionId: Long, onDone: () -> Unit, onCreateRecurring: (Long) -> Unit = {}) {
     val app = LocalApp.current
     val scope = rememberCoroutineScope()
     val accounts by app.repository.accounts.collectAsStateWithLifecycle(initialValue = emptyList())
@@ -540,6 +562,11 @@ fun TransactionEditScreen(transactionId: Long, onDone: () -> Unit) {
                 },
                 modifier = Modifier.fillMaxWidth(),
             ) { Text("Speichern") }
+            if (loaded != null && loaded?.transferPeerId == null) {
+                OutlinedButton(onClick = { onCreateRecurring(transactionId) }, modifier = Modifier.fillMaxWidth()) {
+                    Text("Als Fixkosten anlegen …")
+                }
+            }
         }
     }
 

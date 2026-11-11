@@ -91,6 +91,9 @@ interface TransactionDao {
     @Query("UPDATE transactions SET groupId = :groupId WHERE id IN (:ids)")
     suspend fun setGroup(ids: List<Long>, groupId: Long?)
 
+    @Query("UPDATE transactions SET categoryId = NULL, categoryLocked = 0 WHERE categoryId = :categoryId")
+    suspend fun clearCategory(categoryId: Long)
+
     @Query("UPDATE transactions SET groupId = NULL WHERE groupId = :groupId")
     suspend fun clearGroup(groupId: Long)
 }
@@ -124,6 +127,12 @@ interface CategoryDao {
     @Update
     suspend fun update(category: CategoryEntity)
 
+    @Delete
+    suspend fun delete(category: CategoryEntity)
+
+    @Query("DELETE FROM category_rules WHERE categoryId = :categoryId")
+    suspend fun deleteRulesOf(categoryId: Long)
+
     @Query("SELECT * FROM category_rules")
     suspend fun rules(): List<CategoryRuleEntity>
 
@@ -155,6 +164,9 @@ interface RuleDao {
     @Delete
     suspend fun delete(rule: AutoRuleEntity)
 
+    @Query("DELETE FROM auto_rules WHERE categoryId = :categoryId")
+    suspend fun deleteOfCategory(categoryId: Long)
+
     @Query("DELETE FROM auto_rules WHERE id IN (:ids)")
     suspend fun deleteByIds(ids: List<Long>)
 
@@ -184,6 +196,9 @@ interface RecurringDao {
 
     @Delete
     suspend fun delete(item: RecurringEntity)
+
+    @Query("UPDATE recurring SET categoryId = NULL WHERE categoryId = :categoryId")
+    suspend fun clearCategory(categoryId: Long)
 }
 
 @Dao

@@ -42,6 +42,7 @@ import net.jandev.financialanalyst.ui.more.MoreEntry
 import net.jandev.financialanalyst.ui.more.MoreScreen
 import net.jandev.financialanalyst.ui.overview.OverviewScreen
 import net.jandev.financialanalyst.ui.analysis.CategoryTransactionsScreen
+import net.jandev.financialanalyst.ui.categories.CategoriesScreen
 import net.jandev.financialanalyst.ui.groups.GroupDetailScreen
 import net.jandev.financialanalyst.ui.groups.GroupsScreen
 import net.jandev.financialanalyst.ui.planning.BudgetsScreen
@@ -73,6 +74,7 @@ object Routes {
     const val BUDGETS = "budgets"
     const val GROUPS = "groups"
     const val RULES = "rules"
+    const val CATEGORIES = "categories"
     const val GOALS = "goals"
     const val BACKUP = "backup"
     const val NOTIFICATIONS = "notifications"
@@ -202,9 +204,16 @@ fun AppRoot() {
             composable(TopLevel.Recurring.route) {
                 RecurringScreen(onEdit = { nav.navigate(Routes.recurringEdit(it)) })
             }
-            composable("recurring/{id}", arguments = listOf(navArgument("id") { type = NavType.LongType })) { entry ->
+            composable(
+                "recurring/{id}?fromTx={fromTx}",
+                arguments = listOf(
+                    navArgument("id") { type = NavType.LongType },
+                    navArgument("fromTx") { type = NavType.LongType; defaultValue = 0L },
+                ),
+            ) { entry ->
                 RecurringEditScreen(
                     itemId = entry.arguments?.getLong("id") ?: 0,
+                    fromTransactionId = entry.arguments?.getLong("fromTx") ?: 0,
                     onDone = { nav.popBackStack() },
                 )
             }
@@ -221,6 +230,7 @@ fun AppRoot() {
                     onEditTransaction = { nav.navigate(Routes.transactionEdit(it)) },
                 )
             }
+            composable(Routes.CATEGORIES) { CategoriesScreen(onBack = { nav.popBackStack() }) }
             composable(Routes.RULES) {
                 RulesScreen(onBack = { nav.popBackStack() }, onEdit = { nav.navigate("rule/$it") })
             }
@@ -249,6 +259,7 @@ fun AppRoot() {
                         MoreEntry("Bankverbindungen", "Umsätze automatisch direkt von der Bank abrufen") { nav.navigate(Routes.BANKS) },
                         MoreEntry("Zahlungen sofort erfassen", "Benachrichtigungen der Banking-Apps als vorläufige Umsätze mitlesen") { nav.navigate(Routes.NOTIFICATIONS) },
                         MoreEntry("Gruppen", "Umsätze eines Projekts oder Vorhabens zusammenfassen und den Saldo sehen") { nav.navigate(Routes.GROUPS) },
+                        MoreEntry("Kategorien", "Eigene Kategorien anlegen, umbenennen und einfärben") { nav.navigate(Routes.CATEGORIES) },
                         MoreEntry("Regeln", "Umsätze nach eigenen Bedingungen automatisch kategorisieren") { nav.navigate(Routes.RULES) },
                         MoreEntry("Budgets", "Obergrenzen je Kategorie für den Budgetzeitraum") { nav.navigate(Routes.BUDGETS) },
                         MoreEntry("Sparziele", "Worauf du sparst und wie viel dafür monatlich nötig ist") { nav.navigate(Routes.GOALS) },
@@ -287,6 +298,9 @@ fun AppRoot() {
                 TransactionEditScreen(
                     transactionId = entry.arguments?.getLong("id") ?: 0,
                     onDone = { nav.popBackStack() },
+                    onCreateRecurring = { txId ->
+                        nav.navigate("recurring/0?fromTx=$txId") { popUpTo("transaction/{id}") { inclusive = true } }
+                    },
                 )
             }
         }

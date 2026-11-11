@@ -9,7 +9,10 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Check
+import net.jandev.financialanalyst.ui.categories.CategoryDialog
+import net.jandev.financialanalyst.ui.theme.LocalFinanceColors
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.HorizontalDivider
@@ -49,8 +52,37 @@ fun CategoryPickerDialog(
     val scope = rememberCoroutineScope()
     var applyToAll by remember { mutableStateOf(true) }
     var applying by remember { mutableStateOf<Pair<TransactionEntity, Long>?>(null) }
+    var creating by remember { mutableStateOf(false) }
     applying?.let { (saved, categoryId) ->
         SimilarPaymentsDialog(tx = saved, categoryId = categoryId, categories = categories, onDone = onDismiss)
+        return
+    }
+
+    fun choose(categoryId: Long) {
+        scope.launch {
+            val saved = tx.copy(categoryId = categoryId, categoryLocked = true)
+            app.repository.saveTransaction(saved)
+            if (applyToAll) {
+                applying = saved to categoryId
+            } else {
+                app.afterTransactionsChanged()
+                onDismiss()
+            }
+        }
+    }
+
+    if (creating) {
+        val palette = LocalFinanceColors.current.chart
+        CategoryDialog(
+            category = CategoryEntity(
+                name = "",
+                kind = if (tx.amountCents < 0) CategoryKind.EXPENSE else CategoryKind.INCOME,
+                colorIndex = palette.indices.firstOrNull { index -> categories.none { it.colorIndex == index } } ?: categories.size,
+            ),
+            usedNames = categories.map { it.name.lowercase() }.toSet(),
+            onSaved = { choose(it) },
+            onDone = { creating = false },
+        )
         return
     }
     // Passende Art zuerst: bei einer Abbuchung die Ausgaben-Kategorien, bei einem Eingang die Einnahmen.
@@ -84,18 +116,7 @@ fun CategoryPickerDialog(
                         Row(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .clickable {
-                                    scope.launch {
-                                        val saved = tx.copy(categoryId = category.id, categoryLocked = true)
-                                        app.repository.saveTransaction(saved)
-                                        if (applyToAll) {
-                                            applying = saved to category.id
-                                        } else {
-                                            app.afterTransactionsChanged()
-                                            onDismiss()
-                                        }
-                                    }
-                                }
+                                .clickable { choose(category.id) }
                                 .padding(vertical = 12.dp),
                             verticalAlignment = Alignment.CenterVertically,
                         ) {
@@ -103,6 +124,15 @@ fun CategoryPickerDialog(
                             if (category.id == tx.categoryId) {
                                 Icon(Icons.Filled.Check, contentDescription = "Aktuelle Kategorie", tint = MaterialTheme.colorScheme.primary)
                             }
+                        }
+                    }
+                    item(key = "new") {
+                        Row(
+                            modifier = Modifier.fillMaxWidth().clickable { creating = true }.padding(vertical = 12.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Icon(Icons.Filled.Add, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
+                            Text("Neue Kategorie …", color = MaterialTheme.colorScheme.primary, modifier = Modifier.padding(start = 8.dp))
                         }
                     }
                 }

@@ -86,14 +86,20 @@ Ohne Google-Einrichtung funktioniert die Sicherung als Datei (**Datei speichern 
 - **Regeln** (Mehr → Regeln): eine oder mehrere Bedingungen (Gegenpartei, Verwendungszweck, Betrag, Art, Konto), die
   alle zutreffen müssen. Neue Umsätze werden automatisch zugeordnet; „Speichern und Umsätze zuordnen" wendet eine
   Regel nach Vorschau auf vorhandene Umsätze an. Eigene Regeln gehen den mitgelieferten Schlagwörtern vor.
+- **Kategorien** (Mehr → Kategorien, oder „Neue Kategorie …" direkt beim Zuordnen): eigene anlegen, umbenennen,
+  einfärben, löschen. Gelöschte Kategorien geben ihre Umsätze an die automatische Zuordnung zurück.
 - **Gruppen** (Mehr → Gruppen): Umsätze eines Vorhabens zusammenfassen und den Saldo sehen.
-- Die Umsatzliste zeigt die erwarteten Buchungen der Dauerposten für die nächsten 31 Tage ausgegraut. Die beiden
+- Die Umsatzliste öffnet bei der jüngsten echten Buchung; darüber stehen ausgegraut die erwarteten Buchungen der
+  Dauerposten für die nächsten 31 Tage. Die beiden
   Seiten einer Umbuchung (auch Bankabbuchung und PayPal-Kauf) stehen als zusammenhängender Block.
 - **Analyse:** Kategorien und größte Empfänger lassen sich antippen und zeigen die zugehörigen Umsätze.
 - **Fixkosten:** getrennt nach monatlich, vierteljährlich, jährlich usw., jeweils mit Kategorie und Durchschnitt pro
   Monat; Summen pro Monat, Quartal und Jahr; sortierbar nach Fälligkeit, Kosten oder Kategorie. Ein **Anzeigename**
   dient nur der Anzeige und ändert nichts an der Zuordnung der Zahlungen. Ein erkannter Posten gilt als pausiert, wenn
   die erwartete Buchung mehr als sechs Wochen ausbleibt; er wird von selbst wieder aktiv, sobald eine kommt.
+  „Fixkosten im <Monat>" zeigt, was im laufenden Monat schon gebucht und noch fällig ist, seltene Zahlungen hervorgehoben.
+  Monatszahlungen werden auch erkannt, wenn der Buchungstag schwankt (je Kalendermonat genau eine Buchung).
+  Im Umsatz legt **Als Fixkosten anlegen …** einen Posten aus dieser und gleichen Buchungen an.
 
 ## Stand der Erprobung
 
