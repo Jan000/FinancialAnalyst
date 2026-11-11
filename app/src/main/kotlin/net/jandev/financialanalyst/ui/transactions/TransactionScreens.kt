@@ -60,6 +60,9 @@ import net.jandev.financialanalyst.ui.common.LocalApp
 import net.jandev.financialanalyst.ui.common.MoneyField
 import net.jandev.financialanalyst.ui.common.Screen
 import net.jandev.financialanalyst.ui.common.longLabel
+import net.jandev.financialanalyst.ui.common.LabeledRow
+import net.jandev.financialanalyst.ui.common.SectionCard
+import net.jandev.financialanalyst.ui.common.shortLabel
 import net.jandev.financialanalyst.ui.common.toFieldText
 import androidx.compose.foundation.background
 import androidx.compose.foundation.combinedClickable
@@ -72,8 +75,6 @@ import androidx.compose.ui.graphics.Color
 import net.jandev.financialanalyst.data.db.GroupEntity
 import net.jandev.financialanalyst.ui.theme.LocalFinanceColors
 import androidx.compose.ui.draw.alpha
-import androidx.compose.ui.draw.drawBehind
-import androidx.compose.ui.geometry.Offset
 import net.jandev.financialanalyst.ui.common.dayMonthLabel
 import net.jandev.financialanalyst.domain.Budget
 import net.jandev.financialanalyst.domain.RecurringPlan
@@ -238,50 +239,52 @@ fun TransactionsScreen(onEdit: (Long) -> Unit, onAddAccount: () -> Unit, onOpenR
                     grouped.forEach { (date, entries) ->
                         item(key = "h${date.toEpochDay()}") {
                             // Bis heute zählt, was gebucht ist; an künftigen Tagen, was erwartet wird.
+                            // Je Zeile ein Betrag: beim Kauf über PayPal der Kauf, eine Umbuchung gleicht sich aus.
                             val counted = entries.flatMap { entry ->
-                                // Bankabbuchung und Kauf über PayPal sind dieselbe Ausgabe: nur der Kauf zählt in die Tagessumme.
-                                if (entry.size == 2 && (entry[0].amountCents < 0) == (entry[1].amountCents < 0)) {
-                                    listOf(entry.firstOrNull { it.transferPeerId == null } ?: entry[1])
-                                } else {
-                                    entry
-                                }
+                                if (entry.size == 2 && (entry[0].amountCents < 0) == (entry[1].amountCents < 0)) listOf(entry.mainOf()) else entry
                             }
                             DayHeader(date, counted.filter { it.id > 0 || date > today }.sumOf { it.amountCents }, dimmed = date > today)
                         }
                         items(entries, key = { it.first().id }) { entry ->
-                            val row: @Composable (TransactionEntity, Dp, RowLink) -> Unit = { tx, padding, link ->
-                                val isPlanned = tx.id < 0
-                                TransactionRow(
-                                    tx = tx,
-                                    subtitle = listOfNotNull(
-                                        "Geplant".takeIf { isPlanned },
-                                        // Im Paar kann eine Seite an einem anderen Tag gebucht sein als die Überschrift sagt.
-                                        tx.bookingDate.dayMonthLabel().takeIf { tx.bookingDate != date },
-                                        categoryNames[tx.categoryId] ?: "Ohne Kategorie",
-                                        accountNames[tx.accountId],
-                                    ).joinToString(" · "),
-                                    onClick = { if (isPlanned) planned.second[tx.id]?.let(onOpenRecurring) else onEdit(tx.id) },
-                                    onLongClick = if (isPlanned) null else ({ pickingId = tx.id }),
-                                    horizontalPadding = padding,
-                                    dimmed = isPlanned || tx.bookingDate > today,
-                                    categoryColor = categoryColors[tx.categoryId] ?: MaterialTheme.colorScheme.outlineVariant,
-                                    group = groupMarks[tx.groupId],
-                                    link = link,
+                            val main = entry.mainOf()
+                            val isPlanned = main.id < 0
+                            val other = entry.firstOrNull { it.id != main.id }
+                            val kind = when {
+                                other == null -> PairKind.SINGLE
+                                (other.amountCents < 0) == (main.amountCents < 0) -> PairKind.PAID_VIA
+                                else -> PairKind.TRANSFER
+                            }
+                            // Ein Paar steht am Tag seiner jüngeren Buchung; weicht eine Seite ab, steht ihr Datum dabei.
+                            val otherDate = other?.bookingDate?.takeIf { it != date }?.dayMonthLabel()
+                            val subtitle = when (kind) {
+                                PairKind.SINGLE -> listOfNotNull(
+                                    "Geplant".takeIf { isPlanned },
+                                    main.bookingDate.dayMonthLabel().takeIf { main.bookingDate != date },
+                                    categoryNames[main.categoryId] ?: "Ohne Kategorie",
+                                    accountNames[main.accountId],
                                 )
-                            }
-                            if (entry.size == 1) {
-                                row(entry[0], 16.dp, RowLink.NONE)
-                            } else {
-                                Column(
-                                    Modifier
-                                        .padding(horizontal = 8.dp, vertical = 4.dp)
-                                        .clip(RoundedCornerShape(12.dp))
-                                        .background(MaterialTheme.colorScheme.surfaceContainer),
-                                ) {
-                                    row(entry[0], 8.dp, RowLink.DOWN)
-                                    row(entry[1], 8.dp, RowLink.UP)
-                                }
-                            }
+                                // Kauf über PayPal & Co.: es zählt der Kauf; die Abbuchung beim Konto ist nur die Finanzierung.
+                                PairKind.PAID_VIA -> listOfNotNull(
+                                    categoryNames[main.categoryId] ?: "Ohne Kategorie",
+                                    "${accountNames[main.accountId]} über ${accountNames[other!!.accountId]}" + (otherDate?.let { " ($it)" } ?: ""),
+                                )
+                                PairKind.TRANSFER -> listOfNotNull(
+                                    "${accountNames[main.accountId]} → ${accountNames[other!!.accountId]}",
+                                    otherDate?.let { "Eingang $it" },
+                                )
+                            }.joinToString(" · ")
+                            TransactionRow(
+                                tx = main,
+                                title = if (kind == PairKind.TRANSFER) "Umbuchung" else null,
+                                subtitle = subtitle,
+                                onClick = { if (isPlanned) planned.second[main.id]?.let(onOpenRecurring) else onEdit(main.id) },
+                                onLongClick = if (isPlanned || kind == PairKind.TRANSFER) null else ({ pickingId = main.id }),
+                                dimmed = isPlanned || main.bookingDate > today,
+                                categoryColor = categoryColors[main.categoryId] ?: MaterialTheme.colorScheme.outlineVariant,
+                                group = groupMarks[main.groupId],
+                                // Eine Umbuchung ändert das Vermögen nicht: Betrag ohne Vorzeichen und Farbe.
+                                neutralAmount = kind == PairKind.TRANSFER,
+                            )
                         }
                     }
                 }
@@ -294,8 +297,18 @@ fun TransactionsScreen(onEdit: (Long) -> Unit, onAddAccount: () -> Unit, onOpenR
     }
 }
 
-/** Verbindungslinie zwischen den zwei Zeilen einer Umbuchung: vom Farbpunkt nach unten bzw. von oben zum Farbpunkt. */
-enum class RowLink { NONE, DOWN, UP }
+/** Wie eine Zeile der Umsatzliste entstanden ist: ein Umsatz, ein Kauf über ein Zahlungskonto oder eine Umbuchung. */
+private enum class PairKind { SINGLE, PAID_VIA, TRANSFER }
+
+/**
+ * Der Umsatz, für den eine Zeile steht: beim Kauf über PayPal der Kauf (er hat keinen Partner, die Bankseite zeigt
+ * auf ihn), bei einer Umbuchung der Abgang.
+ */
+private fun List<TransactionEntity>.mainOf(): TransactionEntity = when {
+    size == 1 -> first()
+    (this[0].amountCents < 0) == (this[1].amountCents < 0) -> firstOrNull { it.transferPeerId == null } ?: this[1]
+    else -> minBy { it.amountCents }
+}
 
 /** So weit voraus zeigt die Umsatzliste erwartete Buchungen der Dauerposten. */
 private const val PLANNED_DAYS = 31L
@@ -334,9 +347,11 @@ fun TransactionRow(
     group: Pair<String, Color>? = null,
     /** Ausgegraut: Buchung liegt in der Zukunft oder ist erst geplant. */
     dimmed: Boolean = false,
-    link: RowLink = RowLink.NONE,
+    /** Statt Gegenpartei bzw. Verwendungszweck. */
+    title: String? = null,
+    /** Betrag ohne Vorzeichen und Farbe, etwa für Umbuchungen. */
+    neutralAmount: Boolean = false,
 ) {
-    val linkColor = MaterialTheme.colorScheme.outline
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -348,15 +363,6 @@ fun TransactionRow(
                     Modifier
                 },
             )
-            .drawBehind {
-                if (link == RowLink.NONE) return@drawBehind
-                // Mitte des Farbpunkts; die Linie lässt um ihn herum etwas Luft.
-                val x = (horizontalPadding + 5.dp).toPx()
-                val gap = 9.dp.toPx()
-                val from = if (link == RowLink.DOWN) size.height / 2 + gap else 0f
-                val to = if (link == RowLink.DOWN) size.height else size.height / 2 - gap
-                drawLine(linkColor, Offset(x, from), Offset(x, to), strokeWidth = 2.dp.toPx())
-            }
             .padding(horizontal = horizontalPadding, vertical = 10.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
@@ -365,7 +371,7 @@ fun TransactionRow(
         }
         Column(Modifier.weight(1f).padding(end = 12.dp)) {
             Text(
-                tx.counterparty.ifBlank { tx.purpose.ifBlank { "Ohne Bezeichnung" } },
+                title ?: tx.counterparty.ifBlank { tx.purpose.ifBlank { "Ohne Bezeichnung" } },
                 style = MaterialTheme.typography.bodyLarge,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
@@ -397,12 +403,17 @@ fun TransactionRow(
                 }
             }
         }
-        AmountText(tx.amountCents)
+        if (neutralAmount) AmountText(abs(tx.amountCents), withSign = false, colored = false) else AmountText(tx.amountCents)
     }
 }
 
 @Composable
-fun TransactionEditScreen(transactionId: Long, onDone: () -> Unit, onCreateRecurring: (Long) -> Unit = {}) {
+fun TransactionEditScreen(
+    transactionId: Long,
+    onDone: () -> Unit,
+    onCreateRecurring: (Long) -> Unit = {},
+    onOpenTransaction: (Long) -> Unit = {},
+) {
     val app = LocalApp.current
     val scope = rememberCoroutineScope()
     val accounts by app.repository.accounts.collectAsStateWithLifecycle(initialValue = emptyList())
@@ -416,6 +427,7 @@ fun TransactionEditScreen(transactionId: Long, onDone: () -> Unit, onCreateRecur
     var categoryId by rememberSaveable { mutableStateOf<Long?>(null) }
     var groupId by rememberSaveable { mutableStateOf<Long?>(null) }
     val groups by app.repository.groups.collectAsStateWithLifecycle(initialValue = emptyList())
+    val allTransactions by app.repository.transactions.collectAsStateWithLifecycle(initialValue = emptyList())
     var epochDay by rememberSaveable { mutableStateOf(LocalDate.now().toEpochDay()) }
     var counterparty by rememberSaveable { mutableStateOf("") }
     var purpose by rememberSaveable { mutableStateOf("") }
@@ -562,6 +574,22 @@ fun TransactionEditScreen(transactionId: Long, onDone: () -> Unit, onCreateRecur
                 },
                 modifier = Modifier.fillMaxWidth(),
             ) { Text("Speichern") }
+            // Gegenstück: bei einer Umbuchung oder der Bankseite eines PayPal-Kaufs der Partner, beim Kauf die Bankseite.
+            val peer = remember(loaded, allTransactions) {
+                val self = loaded ?: return@remember null
+                allTransactions.firstOrNull { it.id == self.transferPeerId } ?: allTransactions.firstOrNull { it.transferPeerId == self.id }
+            }
+            if (peer != null) {
+                SectionCard(title = if ((peer.amountCents < 0) == ((loaded?.amountCents ?: 0) < 0)) "Bezahlt über" else "Gegenbuchung") {
+                    LabeledRow(
+                        label = listOfNotNull(
+                            accounts.firstOrNull { it.account.id == peer.accountId }?.account?.name,
+                            peer.bookingDate.shortLabel(),
+                        ).joinToString(" · "),
+                        onClick = { onOpenTransaction(peer.id) },
+                    ) { AmountText(peer.amountCents) }
+                }
+            }
             if (loaded != null && loaded?.transferPeerId == null) {
                 OutlinedButton(onClick = { onCreateRecurring(transactionId) }, modifier = Modifier.fillMaxWidth()) {
                     Text("Als Fixkosten anlegen …")

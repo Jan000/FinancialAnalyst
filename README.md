@@ -90,8 +90,9 @@ Ohne Google-Einrichtung funktioniert die Sicherung als Datei (**Datei speichern 
   einfärben, löschen. Gelöschte Kategorien geben ihre Umsätze an die automatische Zuordnung zurück.
 - **Gruppen** (Mehr → Gruppen): Umsätze eines Vorhabens zusammenfassen und den Saldo sehen.
 - Die Umsatzliste öffnet bei der jüngsten echten Buchung; darüber stehen ausgegraut die erwarteten Buchungen der
-  Dauerposten für die nächsten 31 Tage. Die beiden
-  Seiten einer Umbuchung (auch Bankabbuchung und PayPal-Kauf) stehen als zusammenhängender Block.
+  Dauerposten für die nächsten 31 Tage. Eine Umbuchung
+  steht als eine Zeile („N26 → Tagesgeld", Betrag ohne Vorzeichen); ein Kauf über PayPal als der Kauf selbst mit
+  „PayPal über N26". Die jeweils andere Buchung ist im Umsatz unter „Gegenbuchung" bzw. „Bezahlt über" erreichbar.
 - **Analyse:** Kategorien und größte Empfänger lassen sich antippen und zeigen die zugehörigen Umsätze.
 - **Fixkosten:** getrennt nach monatlich, vierteljährlich, jährlich usw., jeweils mit Kategorie und Durchschnitt pro
   Monat; Summen pro Monat, Quartal und Jahr; sortierbar nach Fälligkeit, Kosten oder Kategorie. Ein **Anzeigename**

@@ -298,6 +298,7 @@ fun AppRoot() {
                 TransactionEditScreen(
                     transactionId = entry.arguments?.getLong("id") ?: 0,
                     onDone = { nav.popBackStack() },
+                    onOpenTransaction = { nav.navigate(Routes.transactionEdit(it)) },
                     onCreateRecurring = { txId ->
                         nav.navigate("recurring/0?fromTx=$txId") { popUpTo("transaction/{id}") { inclusive = true } }
                     },
