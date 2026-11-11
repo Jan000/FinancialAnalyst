@@ -36,7 +36,7 @@ object ForecastCalculator {
                 )
             }
             val stored = recurring.filter { it.active && !it.dismissed && it.accountId == item.account.id }
-                .map { it.matchKey to RecurringPlan(it.displayName, it.amountCents, it.interval, it.nextDue) }
+                .map { it.matchKey to it.plan() }
             // Regelmäßige Umbuchungen (etwa der monatliche Übertrag aufs Mietkonto) sind keine Dauerposten der
             // Auswertung, verändern aber den Stand dieses Kontos: hier eigens erkennen.
             val moves = RecurringDetector.detect(

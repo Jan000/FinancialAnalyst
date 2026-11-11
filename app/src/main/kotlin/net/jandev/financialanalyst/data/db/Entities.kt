@@ -10,6 +10,8 @@ import net.jandev.financialanalyst.domain.AccountType
 import net.jandev.financialanalyst.domain.CategoryKind
 import net.jandev.financialanalyst.domain.ConnectorType
 import net.jandev.financialanalyst.domain.RecurrenceInterval
+import net.jandev.financialanalyst.domain.RecurringPlan
+import net.jandev.financialanalyst.domain.ScheduleChange
 import net.jandev.financialanalyst.domain.RuleField
 import net.jandev.financialanalyst.domain.RuleOp
 import net.jandev.financialanalyst.domain.TxSource
@@ -201,7 +203,20 @@ data class RecurringEntity(
     val parentKey: String = "",
     /** Gruppe, in die die automatisch angelegten Positionen kommen. */
     val groupId: Long? = null,
+    /**
+     * Gesetzt: fester Zahlungsplan laut Vertrag ab diesem ersten Termin. Ausgebliebene Beiträge bleiben dann offen,
+     * bis eine Buchung sie bezahlt; [nextDue] ist der älteste offene Termin.
+     */
+    val firstDue: LocalDate? = null,
+    /** Abweichungen einzelner Termine, kodiert mit [ScheduleChange.encode]. */
+    val scheduleChanges: String = "",
 ) {
+    val isContract: Boolean get() = firstDue != null
+
+    /** Planwerte für Budget und Prognose. */
+    fun plan(): RecurringPlan =
+        RecurringPlan(displayName, amountCents, interval, nextDue, firstDue, ScheduleChange.decode(scheduleChanges))
+
     /** Steckt in einer Sammelabrechnung und belastet kein Konto direkt. */
     val isPosition: Boolean get() = parentKey.isNotBlank()
 

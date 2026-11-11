@@ -101,6 +101,12 @@ Ohne Google-Einrichtung funktioniert die Sicherung als Datei (**Datei speichern 
   jede weitere Lieferung wird automatisch in die erste Abrechnung am oder nach ihrem Termin eingetragen. Spar-Abos
   zählen wie andere Fixkosten in Monatsübersicht, Tagesbudget und Kontoprognose – erwartet zum Liefertermin auf dem
   Konto der Abrechnung; ist die Abrechnung gebucht, zählt nur noch sie.
+- **Zahlungsplan laut Vertrag** (im Dauerposten): für Versicherungen und andere Verträge mit festen Terminen. Erster
+  Beitrag, Rhythmus und regulärer Beitrag legen alle Termine fest; jede Buchung bezahlt den ältesten offenen Termin,
+  auch verspätet. Ausgebliebene Beiträge bleiben offen und zählen in Budget und Prognose, bis sie abgebucht sind –
+  auch mehrere auf einmal. Einzelne Termine lassen sich anpassen: anderer Betrag nur für diesen Termin (Rabatt),
+  neuer Betrag ab diesem Termin (Beitragsänderung), Termin entfällt, ohne Buchung bezahlt. Unter „Zugehörige
+  Buchungen" wählt man, an welchen Buchungen der Posten erkannt wird.
 - **Analyse:** Kategorien und größte Empfänger lassen sich antippen und zeigen die zugehörigen Umsätze.
 - **Fixkosten:** getrennt nach monatlich, vierteljährlich, jährlich usw., jeweils mit Kategorie und Durchschnitt pro
   Monat; Summen pro Monat, Quartal und Jahr; sortierbar nach Fälligkeit, Kosten oder Kategorie. Ein **Anzeigename**

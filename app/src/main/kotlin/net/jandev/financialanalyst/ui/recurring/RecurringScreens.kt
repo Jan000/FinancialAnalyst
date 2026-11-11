@@ -18,6 +18,13 @@ import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material3.Button
 import androidx.compose.material3.Checkbox
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.RadioButton
+import androidx.compose.material3.TextButton
+import net.jandev.financialanalyst.domain.ChangeKind
+import net.jandev.financialanalyst.domain.ContractSchedule
+import net.jandev.financialanalyst.domain.Installment
+import net.jandev.financialanalyst.domain.ScheduleChange
 import androidx.compose.material3.ExtendedFloatingActionButton
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
@@ -252,8 +259,12 @@ private fun ThisMonthCard(
                 splits.filter { it.recurringId == item.id && it.date in start..end }.map { MonthEntry(item, it.date, it.amountCents, booked = true) }
             }
         val due = expenses.flatMap { item ->
-            Budget.plannedFlows(listOf(RecurringPlan(item.displayName, item.amountCents, item.interval, item.nextDue)), today, end)
-                .map { MonthEntry(item, it.date, it.amountCents, booked = false) }
+            if (item.isContract) {
+                // Offene Vertragsbeiträge mit ihrem eigentlichen Termin, auch wenn er vor diesem Monat lag.
+                ContractSchedule.openDues(item.plan(), end).map { MonthEntry(item, it.date, it.amountCents, booked = false) }
+            } else {
+                Budget.plannedFlows(listOf(item.plan()), today, end).map { MonthEntry(item, it.date, it.amountCents, booked = false) }
+            }
         }
         (booked + due).sortedBy { it.date }
     }
@@ -273,7 +284,7 @@ private fun ThisMonthCard(
         val rare = entries.filter { it.item.interval != RecurrenceInterval.MONTHLY && it.item.interval.months > 1 }
         if (rare.isNotEmpty()) {
             Text(
-                "Diesen Monat zusätzlich dran: " + rare.joinToString { "${it.item.displayName} (${it.item.interval.label})" },
+                "Diesen Monat zusätzlich dran: " + rare.distinctBy { it.item.id }.joinToString { "${it.item.displayName} (${it.item.interval.label})" },
                 style = MaterialTheme.typography.bodySmall,
                 color = LocalFinanceColors.current.warning,
             )
@@ -292,6 +303,7 @@ private fun ThisMonthCard(
                                 entry.item.isPosition && entry.booked -> "geliefert am ${entry.date.dayMonthLabel()}"
                                 entry.item.isPosition -> "Lieferung am ${entry.date.dayMonthLabel()}"
                                 entry.booked -> "gebucht am ${entry.date.dayMonthLabel()}"
+                                entry.date < today -> "offen seit ${entry.date.shortLabel()}"
                                 else -> "fällig am ${entry.date.dayMonthLabel()}"
                             },
                             "über Kartenabrechnung".takeIf { entry.item.isPosition },
@@ -343,7 +355,10 @@ private fun RecurringGroup(
 @Composable
 fun RecurringRow(item: RecurringEntity, today: LocalDate, categoryName: String? = null, onClick: (() -> Unit)? = null) {
     val days = item.nextDue.toEpochDay() - today.toEpochDay()
+    val open = if (item.isContract && item.active) ContractSchedule.openDues(item.plan(), today).filter { it.date < today } else emptyList()
     val due = when {
+        open.size == 1 -> "offen seit ${open[0].date.shortLabel()}"
+        open.size > 1 -> "${open.size} Beiträge offen seit ${open[0].date.shortLabel()} (${Money.format(abs(open.sumOf { it.amountCents }))})"
         !item.active && item.detected -> "Buchung vom ${item.nextDue.shortLabel()} blieb aus"
         !item.active -> "pausiert"
         days < 0 -> "überfällig seit ${item.nextDue.dayMonthLabel()}"
@@ -437,6 +452,12 @@ fun RecurringEditScreen(itemId: Long, onDone: () -> Unit, fromTransactionId: Lon
     var contractEnd by rememberSaveable { mutableStateOf(LocalDate.now().plusYears(1).toEpochDay()) }
     var noticeDays by rememberSaveable { mutableStateOf("") }
     var confirmDelete by remember { mutableStateOf(false) }
+    // An welchen Buchungen der Posten erkannt wird; leer = an der Bezeichnung.
+    var linkKey by rememberSaveable { mutableStateOf("") }
+    var isContract by rememberSaveable { mutableStateOf(false) }
+    var firstDue by rememberSaveable { mutableStateOf(LocalDate.now().toEpochDay()) }
+    var changesText by rememberSaveable { mutableStateOf("") }
+    var editingDue by remember { mutableStateOf<Installment?>(null) }
 
     LaunchedEffect(itemId) {
         if (itemId == 0L) return@LaunchedEffect
@@ -455,6 +476,10 @@ fun RecurringEditScreen(itemId: Long, onDone: () -> Unit, fromTransactionId: Lon
             hasContractEnd = item.contractEnd != null
             item.contractEnd?.let { contractEnd = it.toEpochDay() }
             noticeDays = item.noticeDays?.toString().orEmpty()
+            linkKey = item.matchKey
+            isContract = item.isContract
+            firstDue = (item.firstDue ?: item.nextDue).toEpochDay()
+            changesText = item.scheduleChanges
             ready = true
         }
     }
@@ -494,6 +519,7 @@ fun RecurringEditScreen(itemId: Long, onDone: () -> Unit, fromTransactionId: Lon
         if (fromTransactionId == 0L || itemId != 0L || ready) return@LaunchedEffect
         val tx = app.repository.transaction(fromTransactionId) ?: return@LaunchedEffect
         basisKey = RecurringDetector.matchKey(tx.toTx())
+        linkKey = basisKey
         basisName = tx.counterparty.trim().ifEmpty { tx.purpose.trim().take(60) }.ifEmpty { "Zahlung ohne Buchungstext" }
         name = basisName
         categoryId = tx.categoryId
@@ -509,6 +535,29 @@ fun RecurringEditScreen(itemId: Long, onDone: () -> Unit, fromTransactionId: Lon
 
     val amountCents = Money.parse(amount)?.let(::abs)
     val valid = name.isNotBlank() && amountCents != null && amountCents > 0
+    val signedAmount = (amountCents ?: 0).let { if (isExpense) -it else it }
+    // Schlüssel, unter dem die Buchungen gerade zugeordnet würden.
+    val effectiveKey = linkKey.ifBlank { RecurringDetector.matchKey(name.trim(), signedAmount) }
+    val payees = remember(transactions, isExpense, linkKey) {
+        val all = transactions
+            .filter { it.transferPeerId == null && (it.amountCents < 0) == isExpense }
+            .groupBy { RecurringDetector.matchKey(it.toTx()) }
+            .map { (key, txs) -> Payee(key, txs.first().counterparty.ifBlank { txs.first().purpose.take(40) }.ifBlank { "Ohne Buchungstext" }, txs.size, txs.maxOf { it.bookingDate }) }
+            .sortedByDescending { it.latest }
+        // Die zuletzt gebuchten Empfänger, und immer der gerade zugeordnete.
+        (all.take(60) + all.filter { it.key == linkKey }).distinct()
+    }
+    val changes = remember(changesText) { ScheduleChange.decode(changesText) }
+    val schedule = remember(isContract, firstDue, interval, signedAmount, changes, transactions, effectiveKey) {
+        if (!isContract || signedAmount == 0L) emptyList()
+        else {
+            val bookings = transactions.filter { RecurringDetector.matchKey(it.toTx()) == effectiveKey }.map { it.bookingDate to it.amountCents }
+            ContractSchedule.allocate(
+                ContractSchedule.dues(LocalDate.ofEpochDay(firstDue), interval, signedAmount, changes, LocalDate.now().plusMonths(13)),
+                bookings,
+            )
+        }
+    }
 
     Screen(
         title = if (itemId == 0L) "Neuer Dauerposten" else "Dauerposten bearbeiten",
@@ -608,7 +657,21 @@ fun RecurringEditScreen(itemId: Long, onDone: () -> Unit, fromTransactionId: Lon
                 singleLine = true,
                 modifier = Modifier.fillMaxWidth(),
             )
-            MoneyField(value = amount, onValueChange = { amount = it }, label = "Betrag")
+            if (loaded?.isPosition != true) {
+                val byName = Payee("", "An der Bezeichnung erkennen", 0, LocalDate.MIN)
+                val current = payees.firstOrNull { it.key == linkKey }
+                    ?: if (linkKey.isNotBlank()) Payee(linkKey, "Wie bisher", 0, LocalDate.MIN) else byName
+                DropdownField(
+                    label = "Zugehörige Buchungen",
+                    options = listOf(byName) + payees + listOfNotNull(current.takeIf { it !in payees && it != byName }),
+                    selected = current,
+                    onSelect = { linkKey = it.key },
+                    optionLabel = { payee ->
+                        if (payee.count == 0) payee.name else "${payee.name} (${payee.count}×, zuletzt ${payee.latest.shortLabel()})"
+                    },
+                )
+            }
+            MoneyField(value = amount, onValueChange = { amount = it }, label = if (isContract) "Regulärer Beitrag" else "Betrag")
             DropdownField(
                 label = "Rhythmus",
                 options = RecurrenceInterval.entries,
@@ -616,7 +679,19 @@ fun RecurringEditScreen(itemId: Long, onDone: () -> Unit, fromTransactionId: Lon
                 onSelect = { interval = it },
                 optionLabel = { it.label.replaceFirstChar(Char::uppercase) },
             )
-            DateField(date = LocalDate.ofEpochDay(nextDue), onDateChange = { nextDue = it.toEpochDay() }, label = "Nächste Fälligkeit")
+            if (loaded?.isPosition != true) {
+                SwitchRow(
+                    "Zahlungsplan laut Vertrag",
+                    "Feste Termine ab dem ersten Beitrag. Ausgebliebene Beiträge bleiben offen, bis sie abgebucht sind",
+                    isContract,
+                ) { isContract = it }
+            }
+            if (isContract) {
+                DateField(date = LocalDate.ofEpochDay(firstDue), onDateChange = { firstDue = it.toEpochDay() }, label = "Erster Beitrag laut Vertrag")
+                ContractScheduleCard(schedule, changes, onEdit = { editingDue = it })
+            } else {
+                DateField(date = LocalDate.ofEpochDay(nextDue), onDateChange = { nextDue = it.toEpochDay() }, label = "Nächste Fälligkeit")
+            }
             DropdownField(
                 label = "Kategorie",
                 options = categories,
@@ -643,13 +718,11 @@ fun RecurringEditScreen(itemId: Long, onDone: () -> Unit, fromTransactionId: Lon
                     val cents = amountCents ?: return@Button
                     val signed = if (isExpense) -cents else cents
                     val base = loaded ?: RecurringEntity(name = "", amountCents = 0, nextDue = LocalDate.now())
+                    // Ein Schlüssel, der nur aus der alten Bezeichnung entstanden ist, folgt einer Umbenennung.
+                    val nameDerived = loaded?.let { it.matchKey == RecurringDetector.matchKey(it.name, it.amountCents) } == true
                     val key = when {
-                        base.detected -> base.matchKey
-                        // Aus Buchungen angelegt und Bezeichnung unverändert: deren Schlüssel behalten.
-                        basisKey.isNotBlank() && name.trim() == basisName -> basisKey
-                        // Von Hand angelegt und umbenannt: Schlüssel neu aus der Bezeichnung bilden.
-                        loaded != null && name.trim() != loaded?.name -> ""
-                        else -> base.matchKey
+                        nameDerived && linkKey == loaded?.matchKey && name.trim() != loaded?.name -> ""
+                        else -> linkKey
                     }
                     val item = base.copy(
                         matchKey = key,
@@ -665,6 +738,10 @@ fun RecurringEditScreen(itemId: Long, onDone: () -> Unit, fromTransactionId: Lon
                         categoryId = categoryId,
                         contractEnd = if (hasContractEnd) LocalDate.ofEpochDay(contractEnd) else null,
                         noticeDays = if (hasContractEnd) noticeDays.toIntOrNull() else null,
+                        firstDue = if (isContract) LocalDate.ofEpochDay(firstDue) else null,
+                        scheduleChanges = if (isContract) changesText else "",
+                        // Ein Vertrag folgt seinem Plan; die Erkennung schreibt ihn nicht mehr fort.
+                        detected = base.detected && !isContract,
                     )
                     scope.launch {
                         app.repository.saveRecurring(item)
@@ -674,6 +751,19 @@ fun RecurringEditScreen(itemId: Long, onDone: () -> Unit, fromTransactionId: Lon
                 modifier = Modifier.fillMaxWidth(),
             ) { Text("Speichern") }
         }
+    }
+
+    editingDue?.let { due ->
+        InstallmentDialog(
+            due = due,
+            change = changes.firstOrNull { it.date == due.date },
+            isExpense = isExpense,
+            onDismiss = { editingDue = null },
+            onSave = { change ->
+                changesText = ScheduleChange.encode(changes.filter { it.date != due.date } + listOfNotNull(change))
+                editingDue = null
+            },
+        )
     }
 
     if (confirmDelete) {
@@ -692,6 +782,113 @@ fun RecurringEditScreen(itemId: Long, onDone: () -> Unit, fromTransactionId: Lon
             onDismiss = { confirmDelete = false },
         )
     }
+}
+
+private data class Payee(val key: String, val name: String, val count: Int, val latest: LocalDate)
+
+/** Termine eines Vertrags: bisherige mit der zugeordneten Buchung, offene hervorgehoben, dazu die nächsten. */
+@Composable
+private fun ContractScheduleCard(schedule: List<Installment>, changes: List<ScheduleChange>, onEdit: (Installment) -> Unit) {
+    val today = LocalDate.now()
+    val open = schedule.filter { it.isOpen && it.date <= today }
+    SectionCard(title = "Termine") {
+        if (open.isNotEmpty()) {
+            Text(
+                "${if (open.size == 1) "1 Beitrag" else "${open.size} Beiträge"} offen, zusammen ${Money.format(abs(open.sumOf { it.amountCents }))}. " +
+                    "Sie zählen im Budget als fällig, bis sie abgebucht sind.",
+                style = MaterialTheme.typography.bodySmall,
+                color = LocalFinanceColors.current.warning,
+            )
+        }
+        val past = schedule.filter { it.date <= today }.takeLast(8)
+        val future = schedule.filter { it.date > today }.take(4)
+        (past + future).forEachIndexed { index, due ->
+            if (index > 0) HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+            val change = changes.firstOrNull { it.date == due.date }
+            Row(
+                modifier = Modifier.fillMaxWidth().clickable { onEdit(due) }.padding(vertical = 6.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Column(Modifier.weight(1f).padding(end = 12.dp)) {
+                    Text(due.date.shortLabel(), style = MaterialTheme.typography.bodyMedium)
+                    Text(
+                        listOfNotNull(
+                            when {
+                                due.settledManually -> "ohne Buchung bezahlt"
+                                due.paidOn != null -> "abgebucht am ${due.paidOn!!.shortLabel()}" +
+                                    (due.paidCents?.takeIf { it != due.amountCents }?.let { " (${Money.format(abs(it))})" } ?: "")
+                                due.date <= today -> "offen"
+                                else -> "geplant"
+                            },
+                            when (change?.kind) {
+                                ChangeKind.ONCE -> "abweichender Betrag"
+                                ChangeKind.FROM_HERE -> "neuer Beitrag ab hier"
+                                else -> null
+                            },
+                        ).joinToString(" · "),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = if (due.isOpen && due.date <= today) LocalFinanceColors.current.warning else MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                AmountText(due.amountCents, style = MaterialTheme.typography.bodyMedium)
+            }
+        }
+        Text(
+            "Tippe einen Termin an für einen anderen Betrag (Rabatt, Beitragsänderung), eine Pause oder eine Zahlung ohne Buchung.",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+    }
+}
+
+/** Abweichung eines Termins festlegen; „Regulär" entfernt sie. */
+@Composable
+private fun InstallmentDialog(
+    due: Installment,
+    change: ScheduleChange?,
+    isExpense: Boolean,
+    onDismiss: () -> Unit,
+    onSave: (ScheduleChange?) -> Unit,
+) {
+    var kind by rememberSaveable { mutableStateOf(change?.kind) }
+    var amount by rememberSaveable {
+        mutableStateOf(abs(change?.amountCents?.takeIf { it != 0L } ?: due.amountCents).toFieldText())
+    }
+    val cents = Money.parse(amount)?.let(::abs)
+    val needsAmount = kind == ChangeKind.ONCE || kind == ChangeKind.FROM_HERE
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Termin ${due.date.shortLabel()}") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                (listOf<ChangeKind?>(null) + ChangeKind.entries).forEach { option ->
+                    Row(
+                        modifier = Modifier.fillMaxWidth().clickable { kind = option },
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        RadioButton(selected = kind == option, onClick = { kind = option })
+                        Text(option?.label ?: "Regulär", style = MaterialTheme.typography.bodyMedium)
+                    }
+                }
+                if (needsAmount) MoneyField(value = amount, onValueChange = { amount = it }, label = "Betrag")
+            }
+        },
+        confirmButton = {
+            TextButton(
+                enabled = !needsAmount || (cents != null && cents > 0),
+                onClick = {
+                    val chosen = kind
+                    onSave(
+                        chosen?.let {
+                            val value = if (needsAmount) cents ?: 0 else 0
+                            ScheduleChange(due.date, it, if (isExpense) -value else value)
+                        },
+                    )
+                },
+            ) { Text("Übernehmen") }
+        },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Abbrechen") } },
+    )
 }
 
 @Composable

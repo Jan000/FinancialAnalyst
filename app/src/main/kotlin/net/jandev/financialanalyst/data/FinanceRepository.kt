@@ -38,6 +38,8 @@ import net.jandev.financialanalyst.domain.IncomingTx
 import net.jandev.financialanalyst.domain.Reconciler
 import net.jandev.financialanalyst.domain.Reconciliation
 import net.jandev.financialanalyst.domain.RecurringDetector
+import net.jandev.financialanalyst.domain.ContractSchedule
+import net.jandev.financialanalyst.domain.ScheduleChange
 import net.jandev.financialanalyst.domain.TxSource
 import net.jandev.financialanalyst.domain.TxStatus
 import net.jandev.financialanalyst.domain.csv.ImportedTx
@@ -353,7 +355,9 @@ class FinanceRepository(
         }
         // Gibt es für diese Zahlung schon einen Posten (etwa einen erkannten), wird er übernommen statt verdoppelt.
         val twin = if (withKey.id == 0L) db.recurring().all().firstOrNull { it.matchKey == withKey.matchKey } else null
-        val keyed = if (twin != null) withKey.copy(id = twin.id, detected = false, dismissed = false) else withKey
+        val merged = if (twin != null) withKey.copy(id = twin.id, detected = false, dismissed = false) else withKey
+        // Vertrag: der nächste Termin ergibt sich aus Zahlungsplan und Buchungen, nicht aus der Eingabe.
+        val keyed = if (merged.isContract) merged.copy(nextDue = contractNextDue(merged, db.transactions().all())) else merged
         val inserted = db.recurring().upsert(keyed)
         val id = if (keyed.id == 0L) inserted else keyed.id
         val category = keyed.categoryId
@@ -414,6 +418,21 @@ class FinanceRepository(
         }
     }
 
+    /** Ältester offener Termin eines Vertrags, nachdem die passenden Buchungen den Terminen zugeordnet sind. */
+    private fun contractNextDue(item: RecurringEntity, transactions: List<TransactionEntity>, today: LocalDate = LocalDate.now()): LocalDate =
+        ContractSchedule.nextOpen(
+            firstDue = item.firstDue ?: return item.nextDue,
+            interval = item.interval,
+            amountCents = item.amountCents,
+            changes = ScheduleChange.decode(item.scheduleChanges),
+            bookings = contractBookings(item, transactions),
+            today = today,
+        )
+
+    /** Buchungen, die zu einem Vertrag gehören. */
+    fun contractBookings(item: RecurringEntity, transactions: List<TransactionEntity>): List<Pair<LocalDate, Long>> =
+        transactions.filter { RecurringDetector.matchKey(it.toTx()) == item.matchKey }.map { it.bookingDate to it.amountCents }
+
     /** Gleicht die Dauerposten mit der Umsatzhistorie ab: neue erkennen, Termine und Beträge fortschreiben. */
     suspend fun syncRecurring(today: LocalDate = LocalDate.now()) = db.withTransaction {
         val transferCategories = db.categories().all().filter { it.kind == CategoryKind.TRANSFER }.map { it.id }.toSet()
@@ -445,6 +464,8 @@ class FinanceRepository(
                     ),
                 )
                 old.dismissed -> Unit
+                // Ein Vertrag folgt seinem Zahlungsplan; die Erkennung schreibt ihn nicht um.
+                old.isContract -> Unit
                 else -> db.recurring().upsert(
                     old.copy(
                         amountCents = found.amountCents,
@@ -461,6 +482,11 @@ class FinanceRepository(
         val latestByKey = txs.groupBy { RecurringDetector.matchKey(it) }
             .mapValues { entry -> entry.value.maxOf { it.date } }
         for (old in existing) {
+            if (old.isContract) {
+                val due = contractNextDue(old, everything, today)
+                if (due != old.nextDue) db.recurring().upsert(old.copy(nextDue = due))
+                continue
+            }
             if (old.matchKey in detected || old.dismissed) continue
             if (old.detected && old.matchKey !in latestByKey) {
                 // Kein einziger Umsatz trägt den Posten mehr (etwa weil die Buchungen als Umbuchung erkannt wurden).

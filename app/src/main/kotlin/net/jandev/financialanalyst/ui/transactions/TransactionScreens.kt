@@ -110,7 +110,7 @@ fun TransactionsScreen(onEdit: (Long) -> Unit, onAddAccount: () -> Unit, onOpenR
         var nextId = -1L
         // Spar-Abos & Co. erscheinen nicht als eigene Buchung, sondern später als Position ihrer Abrechnung.
         val rows = recurring.filter { it.active && !it.dismissed && !it.isPosition }.flatMap { item ->
-            Budget.plannedFlows(listOf(RecurringPlan(item.displayName, item.amountCents, item.interval, item.nextDue)), today, today.plusDays(PLANNED_DAYS))
+            Budget.plannedFlows(listOf(item.plan()), today, today.plusDays(PLANNED_DAYS))
                 .map { flow ->
                     TransactionEntity(
                         id = nextId--,

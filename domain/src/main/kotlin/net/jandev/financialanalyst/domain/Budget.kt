@@ -9,7 +9,11 @@ data class RecurringPlan(
     val name: String,
     val amountCents: Long,
     val interval: RecurrenceInterval,
+    /** Erster noch offener Termin. */
     val nextDue: LocalDate,
+    /** Gesetzt: fester Zahlungsplan laut Vertrag ab diesem ersten Termin ([ContractSchedule]). */
+    val firstDue: LocalDate? = null,
+    val changes: List<ScheduleChange> = emptyList(),
 )
 
 data class BudgetResult(
@@ -54,6 +58,13 @@ object Budget {
     fun plannedFlows(plans: List<RecurringPlan>, today: LocalDate, until: LocalDate): List<PlannedFlow> {
         val flows = ArrayList<PlannedFlow>()
         for (plan in plans) {
+            if (plan.firstDue != null) {
+                // Vertrag: was offen ist, bleibt fällig, bis es abgebucht ist – auch mehrere Beiträge auf einmal.
+                for (due in ContractSchedule.openDues(plan, until)) {
+                    flows.add(PlannedFlow(maxOf(due.date, today), due.amountCents, plan.name))
+                }
+                continue
+            }
             var due = plan.nextDue
             if (due < today) {
                 if (due.plusDays(OVERDUE_GRACE_DAYS) >= today) {
