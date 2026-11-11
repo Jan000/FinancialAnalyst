@@ -106,7 +106,10 @@ Ohne Google-Einrichtung funktioniert die Sicherung als Datei (**Datei speichern 
   Beitrag, Rhythmus und regulärer Beitrag legen alle Termine fest; jede Buchung bezahlt den ältesten offenen Termin,
   auch verspätet. Ausgebliebene Beiträge bleiben offen und zählen in Budget und Prognose, bis sie abgebucht sind –
   auch mehrere auf einmal. Einzelne Termine lassen sich anpassen: anderer Betrag nur für diesen Termin (Rabatt),
-  neuer Betrag ab diesem Termin (Beitragsänderung), Termin entfällt, ohne Buchung bezahlt. Unter „Zugehörige
+  neuer Betrag ab diesem Termin (Beitragsänderung), Termin entfällt, ohne eigene Buchung bezahlt (bar, zusammen mit
+  einem anderen Termin abgebucht, mit Gutschriften verrechnet). Der Plan kann auch erst mit dem ersten regelmäßigen
+  Termin beginnen, wenn die Anfangszeit eines Vertrags nicht nachgebildet werden soll. Eine Notiz nimmt Vertragsnummer
+  und Konditionen auf. Unter „Zugehörige
   Buchungen" wählt man, an welchen Buchungen der Posten erkannt wird.
 - **Analyse:** Kategorien und größte Empfänger lassen sich antippen und zeigen die zugehörigen Umsätze.
 - **Fixkosten:** getrennt nach monatlich, vierteljährlich, jährlich usw., jeweils mit Kategorie und Durchschnitt pro

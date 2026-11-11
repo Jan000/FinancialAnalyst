@@ -14,8 +14,11 @@ enum class ChangeKind(val label: String) {
     /** Der Termin entfällt (Beitragspause, beitragsfreier Monat). */
     SKIP("Termin entfällt"),
 
-    /** Bezahlt, ohne dass eine Buchung dazu kommt (bar, über ein anderes Konto). */
-    SETTLED("Ohne Buchung bezahlt"),
+    /**
+     * Bezahlt, ohne dass eine eigene Buchung dazu kommt: bar, über ein anderes Konto, zusammen mit einem anderen
+     * Termin abgebucht oder mit einer Gutschrift verrechnet.
+     */
+    SETTLED("Ohne eigene Buchung bezahlt (bar, mit anderer Abbuchung, verrechnet)"),
 }
 
 /** @param amountCents mit Vorzeichen wie der Vertrag; nur für [ChangeKind.ONCE] und [ChangeKind.FROM_HERE] von Bedeutung. */

@@ -458,6 +458,7 @@ fun RecurringEditScreen(itemId: Long, onDone: () -> Unit, fromTransactionId: Lon
     var firstDue by rememberSaveable { mutableStateOf(LocalDate.now().toEpochDay()) }
     var changesText by rememberSaveable { mutableStateOf("") }
     var editingDue by remember { mutableStateOf<Installment?>(null) }
+    var note by rememberSaveable { mutableStateOf("") }
 
     LaunchedEffect(itemId) {
         if (itemId == 0L) return@LaunchedEffect
@@ -480,6 +481,7 @@ fun RecurringEditScreen(itemId: Long, onDone: () -> Unit, fromTransactionId: Lon
             isContract = item.isContract
             firstDue = (item.firstDue ?: item.nextDue).toEpochDay()
             changesText = item.scheduleChanges
+            note = item.note
             ready = true
         }
     }
@@ -687,7 +689,13 @@ fun RecurringEditScreen(itemId: Long, onDone: () -> Unit, fromTransactionId: Lon
                 ) { isContract = it }
             }
             if (isContract) {
-                DateField(date = LocalDate.ofEpochDay(firstDue), onDateChange = { firstDue = it.toEpochDay() }, label = "Erster Beitrag laut Vertrag")
+                DateField(date = LocalDate.ofEpochDay(firstDue), onDateChange = { firstDue = it.toEpochDay() }, label = "Erster Termin des Plans")
+                Text(
+                    "Der erste Beitrag laut Vertrag – oder der erste regelmäßige, wenn die Anfangszeit (Tarifwechsel, Gutschriften) " +
+                        "nicht nachgebildet werden soll. Die Umsätze davor bleiben unberührt.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
                 ContractScheduleCard(schedule, changes, onEdit = { editingDue = it })
             } else {
                 DateField(date = LocalDate.ofEpochDay(nextDue), onDateChange = { nextDue = it.toEpochDay() }, label = "Nächste Fälligkeit")
@@ -712,6 +720,14 @@ fun RecurringEditScreen(itemId: Long, onDone: () -> Unit, fromTransactionId: Lon
                     modifier = Modifier.fillMaxWidth(),
                 )
             }
+            OutlinedTextField(
+                value = note,
+                onValueChange = { note = it },
+                label = { Text("Notiz (optional)") },
+                supportingText = { Text("Etwa Vertragsnummer, Konditionen oder Ansprechpartner; bleibt nur auf diesem Gerät und in der Sicherung") },
+                minLines = 2,
+                modifier = Modifier.fillMaxWidth(),
+            )
             Button(
                 enabled = valid,
                 onClick = {
@@ -740,6 +756,7 @@ fun RecurringEditScreen(itemId: Long, onDone: () -> Unit, fromTransactionId: Lon
                         noticeDays = if (hasContractEnd) noticeDays.toIntOrNull() else null,
                         firstDue = if (isContract) LocalDate.ofEpochDay(firstDue) else null,
                         scheduleChanges = if (isContract) changesText else "",
+                        note = note.trim(),
                         // Ein Vertrag folgt seinem Plan; die Erkennung schreibt ihn nicht mehr fort.
                         detected = base.detected && !isContract,
                     )
@@ -814,7 +831,7 @@ private fun ContractScheduleCard(schedule: List<Installment>, changes: List<Sche
                     Text(
                         listOfNotNull(
                             when {
-                                due.settledManually -> "ohne Buchung bezahlt"
+                                due.settledManually -> "ohne eigene Buchung bezahlt"
                                 due.paidOn != null -> "abgebucht am ${due.paidOn!!.shortLabel()}" +
                                     (due.paidCents?.takeIf { it != due.amountCents }?.let { " (${Money.format(abs(it))})" } ?: "")
                                 due.date <= today -> "offen"
