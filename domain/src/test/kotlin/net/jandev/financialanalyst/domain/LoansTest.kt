@@ -5,6 +5,7 @@ import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.time.LocalDate
+import kotlin.math.roundToLong
 
 class LoansTest {
     private val start = LocalDate.of(2026, 1, 15)
@@ -51,6 +52,18 @@ class LoansTest {
         assertTrue(withExtra.rows.size < plain.rows.size)
         assertTrue(withExtra.totalInterestCents < plain.totalInterestCents)
         assertEquals(0L, withExtra.rows.last().remainingCents)
+    }
+
+    @Test
+    fun extraPaymentLowersInterestFromItsDay() {
+        // Sondertilgung am 1.6., Rate am 15.: bis dahin 16 Tage (30E/360) mit der alten Schuld, danach 14 mit der neuen.
+        val terms = LoanTerms(1000000, 6.0, 20000, start, listOf(ExtraPayment(LocalDate.of(2026, 6, 1), 200000)))
+        val rows = LoanCalculator.schedule(terms).rows
+        val before = rows.first { it.date == LocalDate.of(2026, 5, 15) }.remainingCents
+        val june = rows.first { it.date == LocalDate.of(2026, 6, 15) }
+        val expected = (before * 0.005 * 16 / 30 + (before - 200000) * 0.005 * 14 / 30).roundToLong()
+        assertEquals(expected, june.interestCents)
+        assertEquals(before - 200000 - (20000 - expected), june.remainingCents)
     }
 
     @Test

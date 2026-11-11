@@ -70,7 +70,21 @@ object LoanCalculator {
         var totalPaid = 0L
 
         while (remaining > 0 && rows.size < MAX_MONTHS) {
-            val interest = (remaining * monthlyRate).roundToLong()
+            // Sondertilgungen senken die Schuld ab ihrem Buchungstag: der Monatszins wird anteilig (30/360) gerechnet.
+            val start = if (previous == LocalDate.MIN) date.minusMonths(1) else previous
+            var interestExact = 0.0
+            var share = 0.0
+            var extra = 0L
+            for (payment in extras.filter { it.date > previous && it.date <= date }) {
+                val upTo = (days360(start, payment.date) / 30.0).coerceIn(share, 1.0)
+                interestExact += remaining * monthlyRate * (upTo - share)
+                share = upTo
+                val paid = minOf(remaining, payment.amountCents)
+                remaining -= paid
+                extra += paid
+            }
+            interestExact += remaining * monthlyRate * (1.0 - share)
+            val interest = interestExact.roundToLong()
             val planned = terms.plannedPayment(date)
             val actual = terms.actualPayments?.filter { it.date > previous && it.date <= date }?.sumOf { it.amountCents }
             val past = actual != null && date <= terms.actualUntil
@@ -83,17 +97,11 @@ object LoanCalculator {
             }
             val payment = minOf(wanted, remaining + interest)
             val principal = payment - interest
-            if (!past && principal <= 0 && extras.none { it.date > previous } && terms.rateChanges.none { it.from > date }) {
+            if (!past && principal <= 0 && extras.none { it.date > date } && terms.rateChanges.none { it.from > date }) {
                 // Die Rate deckt nicht einmal die Zinsen: der Kredit wird nie getilgt.
                 return LoanSchedule(rows, totalInterest, totalPaid, null)
             }
             remaining -= principal
-            // Sondertilgungen seit der letzten Rate wirken ab diesem Termin.
-            val extra = minOf(
-                remaining.coerceAtLeast(0),
-                extras.filter { it.date > previous && it.date <= date }.sumOf { it.amountCents },
-            )
-            remaining -= extra
             totalInterest += interest
             totalPaid += payment + extra
             rows.add(LoanRow(date, payment, interest, principal, extra, remaining.coerceAtLeast(0)))
@@ -102,6 +110,10 @@ object LoanCalculator {
         }
         return LoanSchedule(rows, totalInterest, totalPaid, if (remaining <= 0) rows.lastOrNull()?.date else null)
     }
+
+    /** Tage zwischen zwei Daten nach der deutschen Zinsmethode 30E/360. */
+    private fun days360(from: LocalDate, to: LocalDate): Int =
+        360 * (to.year - from.year) + 30 * (to.monthValue - from.monthValue) + (minOf(to.dayOfMonth, 30) - minOf(from.dayOfMonth, 30))
 
     fun status(terms: LoanTerms, schedule: LoanSchedule, today: LocalDate): LoanStatus {
         val done = schedule.rows.filter { it.date <= today }
