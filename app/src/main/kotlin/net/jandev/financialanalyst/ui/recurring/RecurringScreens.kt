@@ -1,5 +1,15 @@
 package net.jandev.financialanalyst.ui.recurring
 
+import net.jandev.financialanalyst.ui.rules.toStored
+import net.jandev.financialanalyst.ui.rules.toDraft
+import net.jandev.financialanalyst.ui.rules.ConditionEditor
+import net.jandev.financialanalyst.data.db.AccountEntity
+import net.jandev.financialanalyst.domain.RuleOp
+import net.jandev.financialanalyst.domain.RuleMatcher
+import net.jandev.financialanalyst.domain.RuleField
+import net.jandev.financialanalyst.domain.RuleCondition
+import net.jandev.financialanalyst.domain.MatchRules
+import net.jandev.financialanalyst.data.db.RecurringIndex
 import net.jandev.financialanalyst.ui.transactions.settlementKeysInUse
 
 import net.jandev.financialanalyst.ui.transactions.settlementOptions
@@ -254,10 +264,10 @@ private fun ThisMonthCard(
     val entries = remember(expenses, transactions, splits, today) {
         val start = today.withDayOfMonth(1)
         val end = today.withDayOfMonth(today.lengthOfMonth())
-        val byKey = expenses.filter { it.matchKey.isNotBlank() }.associateBy { it.matchKey }
+        val index = RecurringIndex(expenses)
         val booked = transactions
             .filter { it.bookingDate in start..today && it.transferPeerId == null && it.amountCents < 0 }
-            .mapNotNull { tx -> byKey[RecurringDetector.matchKey(tx.toTx())]?.let { MonthEntry(it, tx.bookingDate, tx.amountCents, booked = true) } } +
+            .mapNotNull { tx -> index.find(tx)?.let { MonthEntry(it, tx.bookingDate, tx.amountCents, booked = true) } } +
             // Spar-Abos: die schon in eine Abrechnung eingetragenen Lieferungen dieses Monats.
             expenses.filter { it.isPosition }.flatMap { item ->
                 splits.filter { it.recurringId == item.id && it.date in start..end }.map { MonthEntry(item, it.date, it.amountCents, booked = true) }
@@ -464,6 +474,10 @@ fun RecurringEditScreen(itemId: Long, onDone: () -> Unit, fromTransactionId: Lon
     var editingDue by remember { mutableStateOf<Installment?>(null) }
     var note by rememberSaveable { mutableStateOf("") }
     var parentKey by rememberSaveable { mutableStateOf("") }
+    // Eigene Regeln, welche Buchungen dazugehören: Formularwerte, kodiert wie gespeichert.
+    var ownRules by rememberSaveable { mutableStateOf(false) }
+    var rulesText by rememberSaveable { mutableStateOf("") }
+    val accounts by app.repository.accounts.collectAsStateWithLifecycle(initialValue = emptyList())
 
     LaunchedEffect(itemId) {
         if (itemId == 0L) return@LaunchedEffect
@@ -488,6 +502,8 @@ fun RecurringEditScreen(itemId: Long, onDone: () -> Unit, fromTransactionId: Lon
             changesText = item.scheduleChanges
             note = item.note
             parentKey = item.parentKey
+            ownRules = item.hasOwnRules
+            rulesText = MatchRules.encode(MatchRules.decode(item.matchRules).map { rule -> rule.map { it.toDraft() } })
             ready = true
         }
     }
@@ -542,7 +558,10 @@ fun RecurringEditScreen(itemId: Long, onDone: () -> Unit, fromTransactionId: Lon
     }
 
     val amountCents = Money.parse(amount)?.let(::abs)
-    val valid = name.isNotBlank() && amountCents != null && amountCents > 0
+    val ruleDrafts = remember(rulesText) { MatchRules.decode(rulesText) }
+    val storedRules = remember(ruleDrafts) { ruleDrafts.map { rule -> rule.map { it.toStored() } } }
+    val rulesValid = !ownRules || (storedRules.isNotEmpty() && storedRules.all { rule -> rule.isNotEmpty() && rule.all(RuleMatcher::isValid) })
+    val valid = name.isNotBlank() && amountCents != null && amountCents > 0 && rulesValid
     val signedAmount = (amountCents ?: 0).let { if (isExpense) -it else it }
     // Schlüssel, unter dem die Buchungen gerade zugeordnet würden.
     val effectiveKey = linkKey.ifBlank { RecurringDetector.matchKey(name.trim(), signedAmount) }
@@ -556,10 +575,17 @@ fun RecurringEditScreen(itemId: Long, onDone: () -> Unit, fromTransactionId: Lon
         (all.take(60) + all.filter { it.key == linkKey }).distinct()
     }
     val changes = remember(changesText) { ScheduleChange.decode(changesText) }
-    val schedule = remember(isContract, firstDue, interval, signedAmount, changes, transactions, effectiveKey) {
+    // Buchungen, die nach den eigenen Regeln dazugehören (Vorschau).
+    val ruleHits = remember(ownRules, storedRules, rulesValid, transactions) {
+        if (!ownRules || !rulesValid) emptyList()
+        else transactions.filter { it.id > 0 && MatchRules.matches(storedRules, it.counterparty, it.purpose, it.amountCents, it.accountId) }
+            .sortedByDescending { it.bookingDate }
+    }
+    val schedule = remember(isContract, firstDue, interval, signedAmount, changes, transactions, effectiveKey, ownRules, ruleHits) {
         if (!isContract || signedAmount == 0L) emptyList()
         else {
-            val bookings = transactions.filter { RecurringDetector.matchKey(it.toTx()) == effectiveKey }.map { it.bookingDate to it.amountCents }
+            val bookings = (if (ownRules) ruleHits else transactions.filter { RecurringDetector.matchKey(it.toTx()) == effectiveKey })
+                .map { it.bookingDate to it.amountCents }
             ContractSchedule.allocate(
                 ContractSchedule.dues(LocalDate.ofEpochDay(firstDue), interval, signedAmount, changes, LocalDate.now().plusMonths(13)),
                 bookings,
@@ -683,6 +709,21 @@ fun RecurringEditScreen(itemId: Long, onDone: () -> Unit, fromTransactionId: Lon
                 modifier = Modifier.fillMaxWidth(),
             )
             if (loaded?.isPosition != true) {
+                MatchRulesSection(
+                    enabled = ownRules,
+                    onEnabledChange = { on ->
+                        ownRules = on
+                        // Vorschlag: was die Automatik bisher zuordnet – Empfänger und Betragsbereich.
+                        if (on && ruleDrafts.isEmpty()) rulesText = MatchRules.encode(listOf(suggestedRule(effectiveKey, signedAmount).map { it.toDraft() }))
+                    },
+                    drafts = ruleDrafts,
+                    onDraftsChange = { rulesText = MatchRules.encode(it) },
+                    accounts = accounts.map { it.account },
+                    hits = ruleHits,
+                    valid = rulesValid,
+                )
+            }
+            if (loaded?.isPosition != true && !ownRules) {
                 val byName = Payee("", "An der Bezeichnung erkennen", 0, LocalDate.MIN)
                 val current = payees.firstOrNull { it.key == linkKey }
                     ?: if (linkKey.isNotBlank()) Payee(linkKey, "Wie bisher", 0, LocalDate.MIN) else byName
@@ -785,7 +826,8 @@ fun RecurringEditScreen(itemId: Long, onDone: () -> Unit, fromTransactionId: Lon
                             transactions.lastOrNull { RecurringDetector.matchKey(it.toTx()) == parentKey }?.accountId ?: base.accountId
                         } else base.accountId,
                         // Ein Vertrag folgt seinem Plan; die Erkennung schreibt ihn nicht mehr fort.
-                        detected = base.detected && !isContract,
+                        detected = base.detected && !isContract && !ownRules,
+                        matchRules = if (ownRules && base.parentKey.isBlank()) MatchRules.encode(storedRules) else "",
                     )
                     scope.launch {
                         app.repository.saveRecurring(item)
@@ -829,6 +871,101 @@ fun RecurringEditScreen(itemId: Long, onDone: () -> Unit, fromTransactionId: Lon
 }
 
 private data class Payee(val key: String, val name: String, val count: Int, val latest: LocalDate)
+
+/** Was die Automatik einem Posten zuordnet, als Regel: Empfänger und Betragsbereich. */
+private fun suggestedRule(key: String, signedAmount: Long): List<RuleCondition> {
+    val base = key.substringBeforeLast('|')
+    val sign = when {
+        key.endsWith("|-") -> -1
+        key.endsWith("|+") -> 1
+        else -> if (signedAmount < 0) -1 else 1
+    }
+    val byKey = if (base.isBlank()) emptyList() else RuleMatcher.fromLearnKey(base, sign)
+    if (signedAmount == 0L || byKey.any { it.field == RuleField.AMOUNT }) return byKey
+    val range = RecurringEntity(name = "", amountCents = signedAmount, nextDue = LocalDate.now()).coveredRange()
+    return byKey + RuleCondition(RuleField.AMOUNT, RuleOp.AT_LEAST, range.first.toString()) +
+        RuleCondition(RuleField.AMOUNT, RuleOp.AT_MOST, range.last.toString())
+}
+
+/**
+ * Eigene Regeln, welche Buchungen zum Posten gehören: innerhalb einer Regel müssen alle Bedingungen zutreffen,
+ * von mehreren Regeln genügt eine.
+ */
+@Composable
+private fun MatchRulesSection(
+    enabled: Boolean,
+    onEnabledChange: (Boolean) -> Unit,
+    drafts: List<List<RuleCondition>>,
+    onDraftsChange: (List<List<RuleCondition>>) -> Unit,
+    accounts: List<AccountEntity>,
+    hits: List<TransactionEntity>,
+    valid: Boolean,
+) {
+    SwitchRow(
+        "Eigene Regeln für die Zuordnung",
+        "Legt genau fest, welche Buchungen dazugehören, etwa Empfänger und Betragsbereich. Sonst automatisch: " +
+            "gleicher Empfänger und ähnlicher Betrag",
+        enabled,
+        onEnabledChange,
+    )
+    if (!enabled) return
+    val newCondition = RuleCondition(RuleField.COUNTERPARTY, RuleOp.CONTAINS, "")
+    drafts.forEachIndexed { ruleIndex, rule ->
+        if (ruleIndex > 0) Text("oder", style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.primary)
+        Text(
+            if (drafts.size == 1) "Gehört dazu, wenn alle Bedingungen zutreffen" else "Regel ${ruleIndex + 1}: alle Bedingungen treffen zu",
+            style = MaterialTheme.typography.titleSmall,
+        )
+        rule.forEachIndexed { index, condition ->
+            ConditionEditor(
+                condition = condition,
+                accounts = accounts,
+                removable = rule.size > 1 || drafts.size > 1,
+                onChange = { changed ->
+                    onDraftsChange(drafts.mapIndexed { r, conditions -> if (r != ruleIndex) conditions else conditions.toMutableList().also { it[index] = changed } })
+                },
+                onRemove = {
+                    onDraftsChange(
+                        drafts.mapIndexed { r, conditions -> if (r != ruleIndex) conditions else conditions.filterIndexed { i, _ -> i != index } }
+                            .filter { it.isNotEmpty() },
+                    )
+                },
+            )
+        }
+        TextButton(onClick = { onDraftsChange(drafts.mapIndexed { r, conditions -> if (r == ruleIndex) conditions + newCondition else conditions }) }) {
+            Icon(Icons.Filled.Add, contentDescription = null)
+            Text("Bedingung (und)", modifier = Modifier.padding(start = 8.dp))
+        }
+    }
+    TextButton(onClick = { onDraftsChange(drafts + listOf(listOf(newCondition))) }) {
+        Icon(Icons.Filled.Add, contentDescription = null)
+        Text("Weitere Regel (oder)", modifier = Modifier.padding(start = 8.dp))
+    }
+    SectionCard(title = "Zugeordnete Buchungen") {
+        Text(
+            when {
+                !valid -> "Fülle alle Bedingungen aus, um die Treffer zu sehen."
+                hits.isEmpty() -> "Trifft bisher auf keine Buchung zu."
+                hits.size == 1 -> "Trifft auf 1 Buchung zu."
+                else -> "Trifft auf ${hits.size} Buchungen zu."
+            },
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        hits.take(8).forEach { tx ->
+            Row(Modifier.fillMaxWidth().padding(vertical = 2.dp), verticalAlignment = Alignment.CenterVertically) {
+                Column(Modifier.weight(1f).padding(end = 12.dp)) {
+                    Text(tx.counterparty.ifBlank { tx.purpose }.ifBlank { "Ohne Buchungstext" }, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    Text(tx.bookingDate.shortLabel(), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+                AmountText(tx.amountCents, style = MaterialTheme.typography.bodyMedium)
+            }
+        }
+        if (hits.size > 8) {
+            Text("… und ${hits.size - 8} ältere", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+    }
+}
 
 /** Termine eines Vertrags: bisherige mit der zugeordneten Buchung, offene hervorgehoben, dazu die nächsten. */
 @Composable

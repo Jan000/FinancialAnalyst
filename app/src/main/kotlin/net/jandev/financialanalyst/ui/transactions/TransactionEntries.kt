@@ -1,5 +1,6 @@
 package net.jandev.financialanalyst.ui.transactions
 
+import net.jandev.financialanalyst.data.db.RecurringIndex
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -10,8 +11,6 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import net.jandev.financialanalyst.data.db.SplitEntity
 import net.jandev.financialanalyst.data.db.TransactionEntity
-import net.jandev.financialanalyst.data.toTx
-import net.jandev.financialanalyst.domain.RecurringDetector
 import net.jandev.financialanalyst.ui.common.LocalApp
 import net.jandev.financialanalyst.ui.common.dayMonthLabel
 import net.jandev.financialanalyst.ui.theme.LocalFinanceColors
@@ -24,12 +23,14 @@ class RowContext(
     val categoryColors: Map<Long, Color>,
     val groupMarks: Map<Long, Pair<String, Color>>,
     val splitsByParent: Map<Long, List<SplitEntity>>,
-    /** Anzeigename eines Fixkosten-Postens je Schlüssel seiner Buchungen. */
-    val aliasByKey: Map<String, String>,
+    /** Fixkosten-Posten mit Anzeigename. */
+    val aliased: RecurringIndex,
 ) {
-    /** Wie die Zeile heißt: der Anzeigename des zugehörigen Dauerpostens, sonst Gegenpartei bzw. Verwendungszweck. */
-    fun titleOf(tx: TransactionEntity): String? =
-        if (tx.id <= 0 || aliasByKey.isEmpty()) null else aliasByKey[RecurringDetector.matchKey(tx.toTx())]
+    /**
+     * Wie die Zeile heißt: der Anzeigename des zugehörigen Dauerpostens, sonst Gegenpartei bzw. Verwendungszweck.
+     * Nur Buchungen mit passendem Betrag tragen ihn, andere Käufe beim selben Anbieter nicht.
+     */
+    fun titleOf(tx: TransactionEntity): String? = if (tx.id <= 0) null else aliased.find(tx)?.alias
 }
 
 @Composable
@@ -48,7 +49,7 @@ fun rememberRowContext(): RowContext {
             categoryColors = categories.associate { it.id to palette[it.colorIndex.mod(palette.size)] },
             groupMarks = groups.associate { it.id to (it.name to palette[it.colorIndex.mod(palette.size)]) },
             splitsByParent = splits.groupBy { it.parentId },
-            aliasByKey = recurring.filter { it.alias.isNotBlank() && !it.isPosition && !it.dismissed }.associate { it.matchKey to it.alias },
+            aliased = RecurringIndex(recurring.filter { it.alias.isNotBlank() && !it.isPosition && !it.dismissed }),
         )
     }
 }

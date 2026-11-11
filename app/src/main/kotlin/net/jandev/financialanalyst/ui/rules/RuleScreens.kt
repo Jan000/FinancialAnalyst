@@ -141,10 +141,12 @@ private val draftSaver = listSaver<List<RuleCondition>, String>(
     restore = { flat -> flat.chunked(3).map { RuleCondition(RuleField.valueOf(it[0]), RuleOp.valueOf(it[1]), it[2]) } },
 )
 
-private fun RuleCondition.toStored(): RuleCondition =
+/** Bedingung aus dem Formular in gespeicherter Form (Betrag in Cent). */
+fun RuleCondition.toStored(): RuleCondition =
     if (field == RuleField.AMOUNT) copy(value = Money.parse(value)?.let { abs(it).toString() }.orEmpty()) else copy(value = value.trim())
 
-private fun RuleCondition.toDraft(): RuleCondition =
+/** Gespeicherte Bedingung als Formularwert (Betrag als Text). */
+fun RuleCondition.toDraft(): RuleCondition =
     if (field == RuleField.AMOUNT) copy(value = value.toLongOrNull()?.toFieldText().orEmpty()) else this
 
 @Composable
@@ -313,7 +315,7 @@ private data class Direction(val value: String, val label: String)
 private val directions = listOf(Direction(RuleMatcher.OUT, "Ausgabe"), Direction(RuleMatcher.IN, "Einnahme"))
 
 @Composable
-private fun ConditionEditor(
+fun ConditionEditor(
     condition: RuleCondition,
     accounts: List<AccountEntity>,
     removable: Boolean,

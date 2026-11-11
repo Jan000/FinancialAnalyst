@@ -1,5 +1,11 @@
 package net.jandev.financialanalyst.data.db
 
+import net.jandev.financialanalyst.domain.Tx
+import net.jandev.financialanalyst.domain.RuleCondition
+import net.jandev.financialanalyst.domain.MatchRules
+import kotlin.math.abs
+import net.jandev.financialanalyst.domain.RecurringDetector
+import net.jandev.financialanalyst.data.toTx
 import androidx.room.ColumnInfo
 import androidx.room.Embedded
 import androidx.room.Entity
@@ -210,6 +216,11 @@ data class RecurringEntity(
     val firstDue: LocalDate? = null,
     /** Abweichungen einzelner Termine, kodiert mit [ScheduleChange.encode]. */
     val scheduleChanges: String = "",
+    /**
+     * Eigene Regeln, welche Buchungen zum Posten gehören, kodiert mit [MatchRules.encode]. Leer: automatisch über
+     * [matchKey] und einen zum Betrag passenden Spielraum.
+     */
+    val matchRules: String = "",
 ) {
     val isContract: Boolean get() = firstDue != null
 
@@ -222,6 +233,57 @@ data class RecurringEntity(
 
     /** Was die Oberfläche zeigt: der Anzeigename, sonst die Bezeichnung. */
     val displayName: String get() = alias.ifBlank { name }
+
+    /** Beträge, um die herum Buchungen zum Posten gehören: der aktuelle und der vor der letzten Änderung. */
+    private val referenceAmounts: List<Long> get() = listOfNotNull(amountCents, previousAmountCents).filter { it != 0L }
+
+    val hasOwnRules: Boolean get() = matchRules.isNotBlank()
+
+    /**
+     * Ob eine Buchung mit dem Schlüssel des Postens auch vom Betrag her zu ihm gehört. Verkauft ein Anbieter mehrere
+     * Produkte (Domain für 24 €, Zusatzpaket für 3 €), trennt der Betrag sie; kleine Preisänderungen passen weiter.
+     * Ein Vertrag hat seine Beträge im Zahlungsplan und nimmt jede Buchung seines Schlüssels.
+     */
+    fun covers(cents: Long): Boolean {
+        if (isContract || isPosition) return true
+        if (cents == 0L || (cents < 0) != (amountCents < 0)) return false
+        return referenceAmounts.any { ref -> abs(abs(cents) - abs(ref)) <= amountTolerance(ref) }
+    }
+
+    /** Kleinster und größter Betrag (ohne Vorzeichen), den [covers] noch annimmt. */
+    fun coveredRange(): LongRange =
+        referenceAmounts.minOf { abs(it) - amountTolerance(it) }.coerceAtLeast(1)..referenceAmounts.maxOf { abs(it) + amountTolerance(it) }
+}
+
+/** Spielraum um den Betrag eines Dauerpostens: 30 %, mindestens 1 €. */
+private fun amountTolerance(cents: Long): Long = maxOf(abs(cents) * 3 / 10, 100)
+
+/**
+ * Entscheidet, ob eine Buchung zu einem Dauerposten gehört: nach seinen eigenen Regeln, sonst automatisch über den
+ * gleichen Schlüssel und einen passenden Betrag ([RecurringEntity.covers]).
+ */
+class RecurringMatcher(val item: RecurringEntity) {
+    val rules: List<List<RuleCondition>> = MatchRules.decode(item.matchRules)
+
+    fun matches(tx: Tx): Boolean =
+        if (rules.isNotEmpty()) MatchRules.matches(rules, tx.counterparty, tx.purpose, tx.amountCents, tx.accountId)
+        else item.matchKey.isNotBlank() && RecurringDetector.matchKey(tx) == item.matchKey && item.covers(tx.amountCents)
+
+    fun matches(tx: TransactionEntity): Boolean = matches(tx.toTx())
+}
+
+/** Ordnet Buchungen ihrem Dauerposten zu; Posten mit eigenen Regeln gehen vor. */
+class RecurringIndex(items: List<RecurringEntity>) {
+    private val custom = items.filter { it.hasOwnRules && !it.isPosition }.map(::RecurringMatcher).filter { it.rules.isNotEmpty() }
+    private val byKey = items.filter { !it.hasOwnRules && it.matchKey.isNotBlank() }.groupBy { it.matchKey }
+
+    fun find(tx: Tx): RecurringEntity? {
+        custom.firstOrNull { it.matches(tx) }?.let { return it.item }
+        if (byKey.isEmpty()) return null
+        return byKey[RecurringDetector.matchKey(tx)]?.firstOrNull { it.covers(tx.amountCents) }
+    }
+
+    fun find(tx: TransactionEntity): RecurringEntity? = if (custom.isEmpty() && byKey.isEmpty()) null else find(tx.toTx())
 }
 
 @Entity(tableName = "loans")

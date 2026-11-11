@@ -122,6 +122,12 @@ Ohne Google-Einrichtung funktioniert die Sicherung als Datei (**Datei speichern 
   „Fixkosten im <Monat>" zeigt, was im laufenden Monat schon gebucht und noch fällig ist, seltene Zahlungen hervorgehoben.
   Monatszahlungen werden auch erkannt, wenn der Buchungstag schwankt (je Kalendermonat genau eine Buchung).
   Im Umsatz legt **Als Fixkosten anlegen …** einen Posten aus dieser und gleichen Buchungen an.
+  **Welche Buchungen dazugehören:** automatisch gleicher Empfänger und ähnlicher Betrag (±30 %, mindestens 1 €), sodass
+  andere Käufe beim selben Anbieter (etwa ein 3-€-Paket neben der 24-€-Domain) weder Anzeigename noch Kategorie des
+  Postens bekommen. Mit **Eigene Regeln für die Zuordnung** legt man es selbst fest: Bedingungen wie bei den
+  Kategorie-Regeln (Gegenpartei, Zweck, Betrag mindestens/höchstens, Art, Konto), innerhalb einer Regel mit „und“,
+  mehrere Regeln mit „oder“; eine Vorschau zeigt die Treffer. Die Regeln gelten für Anzeigename, Kategorie,
+  Monatsübersicht, Budget, Prognose und Vertragstermine.
 
 ## Stand der Erprobung
 

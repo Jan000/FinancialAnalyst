@@ -107,3 +107,35 @@ object RuleMatcher {
         return listOfNotNull(RuleCondition(RuleField.TEXT, RuleOp.EQUALS, key), direction)
     }
 }
+
+/**
+ * Regeln, die Buchungen einem Dauerposten zuordnen. Eine Buchung gehört dazu, wenn eine der Regeln zutrifft (oder);
+ * eine Regel trifft zu, wenn alle ihre Bedingungen zutreffen (und). So lässt sich etwa „IONOS und Betrag 20–30 €“
+ * oder „Vodafone oder Kabel Deutschland“ ausdrücken.
+ */
+object MatchRules {
+    fun matches(rules: List<List<RuleCondition>>, counterparty: String, purpose: String, amountCents: Long, accountId: Long): Boolean =
+        rules.any { RuleMatcher.matches(it, counterparty, purpose, amountCents, accountId) }
+
+    /** Kompakte Ablage in einer Textspalte: Regeln zeilenweise, Bedingungen mit `;`, Teile mit `|`. */
+    fun encode(rules: List<List<RuleCondition>>): String = rules.filter { it.isNotEmpty() }.joinToString("\n") { rule ->
+        rule.joinToString(";") { "${it.field.name}|${it.op.name}|${escape(it.value)}" }
+    }
+
+    /** Unlesbare Teile werden übergangen. */
+    fun decode(text: String): List<List<RuleCondition>> = text.split('\n').mapNotNull { line ->
+        line.split(';').mapNotNull { part ->
+            val fields = part.split('|')
+            if (fields.size != 3) return@mapNotNull null
+            val field = RuleField.entries.firstOrNull { it.name == fields[0] } ?: return@mapNotNull null
+            val op = RuleOp.entries.firstOrNull { it.name == fields[1] } ?: return@mapNotNull null
+            RuleCondition(field, op, unescape(fields[2]))
+        }.takeIf { it.isNotEmpty() }
+    }
+
+    private fun escape(value: String) =
+        value.replace("%", "%25").replace(";", "%3B").replace("|", "%7C").replace("\n", "%0A")
+
+    private fun unescape(value: String) =
+        value.replace("%0A", "\n").replace("%7C", "|").replace("%3B", ";").replace("%25", "%")
+}

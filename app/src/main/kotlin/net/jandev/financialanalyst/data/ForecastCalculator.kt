@@ -1,5 +1,6 @@
 package net.jandev.financialanalyst.data
 
+import net.jandev.financialanalyst.data.db.RecurringIndex
 import net.jandev.financialanalyst.data.db.AccountWithBalance
 import net.jandev.financialanalyst.data.db.RecurringEntity
 import net.jandev.financialanalyst.data.db.TransactionEntity
@@ -35,18 +36,20 @@ object ForecastCalculator {
                     MonthEnd.forecast(today, item.account.openingBalanceCents, own.map { it.bookingDate to it.amountCents }, emptyList(), 0, 0.0),
                 )
             }
-            val stored = recurring.filter { it.active && !it.dismissed && it.accountId == item.account.id }
-                .map { it.matchKey to it.plan() }
+            val storedItems = recurring.filter { it.active && !it.dismissed && it.accountId == item.account.id }
+            val storedIndex = RecurringIndex(storedItems)
+            val stored = storedItems.map { it.matchKey to it.plan() }
             // Regelmäßige Umbuchungen (etwa der monatliche Übertrag aufs Mietkonto) sind keine Dauerposten der
             // Auswertung, verändern aber den Stand dieses Kontos: hier eigens erkennen.
             val moves = RecurringDetector.detect(
                 own.filter { it.transferPeerId != null || it.categoryId in transferCategoryIds }.map { it.toTx().copy(isTransfer = false) },
                 today,
             ).map { it.matchKey to RecurringPlan(it.name, it.amountCents, it.interval, it.nextDue) }
-            val fixedKeys = (stored + moves).map { it.first }.toSet()
+            val moveKeys = moves.map { it.first }.toSet()
             val flows = Budget.plannedFlows((stored + moves).map { it.second }, today, monthEnd).map { it.date to it.amountCents }
             // Alles, was kein Dauerposten ist – auch Umbuchungen, denn sie verändern den Stand dieses Kontos.
-            val other = own.filter { RecurringDetector.matchKey(it.toTx()) !in fixedKeys }.map { it.bookingDate to it.amountCents }
+            val other = own.filter { storedIndex.find(it) == null && RecurringDetector.matchKey(it.toTx()) !in moveKeys }
+                .map { it.bookingDate to it.amountCents }
             AccountForecast(
                 item,
                 MonthEnd.forecast(

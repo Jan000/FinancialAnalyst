@@ -1,5 +1,8 @@
 package net.jandev.financialanalyst.data
 
+import net.jandev.financialanalyst.domain.MatchRules
+import net.jandev.financialanalyst.data.db.RecurringMatcher
+import net.jandev.financialanalyst.data.db.RecurringIndex
 import androidx.room.withTransaction
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.combine
@@ -23,7 +26,9 @@ import net.jandev.financialanalyst.data.db.TransactionEntity
 import net.jandev.financialanalyst.domain.AccountType
 import net.jandev.financialanalyst.domain.AutoRule
 import net.jandev.financialanalyst.domain.RuleCondition
+import net.jandev.financialanalyst.domain.RuleField
 import net.jandev.financialanalyst.domain.RuleMatcher
+import net.jandev.financialanalyst.domain.RuleOp
 import net.jandev.financialanalyst.domain.CategoryKind
 import net.jandev.financialanalyst.domain.CategoryRule
 import net.jandev.financialanalyst.domain.Categorizer
@@ -263,8 +268,8 @@ class FinanceRepository(
             val changed = all.filter { it.id in ids && it.categoryId != categoryId }.map { it.copy(categoryId = categoryId) }
             val excluded = all.filter { it.id in out && it.categoryId == null && !it.categoryLocked }.map { it.copy(categoryLocked = true) }
             if (changed.isNotEmpty() || excluded.isNotEmpty()) db.transactions().updateAll(changed + excluded)
-            val keys = all.filter { it.id in ids }.map { RecurringDetector.matchKey(it.toTx()) }.toSet()
-            val items = db.recurring().all().filter { it.matchKey in keys && it.categoryId != categoryId }
+            val index = RecurringIndex(db.recurring().all().filter { it.categoryId != categoryId })
+            val items = all.filter { it.id in ids }.mapNotNull { index.find(it) }.distinctBy { it.id }
             if (items.isNotEmpty()) db.recurring().updateAll(items.map { it.copy(categoryId = categoryId) })
         }
 
@@ -364,11 +369,58 @@ class FinanceRepository(
         val key = keyed.matchKey.substringBeforeLast('|')
         if (keyed.isPosition) {
             applySplitTemplates()
+        } else if (category != null && keyed.hasOwnRules) {
+            // Eigene Regeln: jede wird zu einer Kategorie-Regel; die bisherigen Regeln dieses Postens ersetzen sie.
+            val own = MatchRules.decode(keyed.matchRules)
+            val byKey = if (key.isNotBlank()) RuleMatcher.fromLearnKey(key, sign = if (keyed.matchKey.endsWith("|-")) -1 else 1) else emptyList()
+            val outdated = loadRules().filter {
+                it.rule.categoryId == category && (it.rule.name == keyed.name || it.conditions.toSet() == byKey.toSet()) &&
+                    own.none { rule -> rule.toSet() == it.conditions.toSet() }
+            }
+            if (outdated.isNotEmpty()) db.rules().deleteByIds(outdated.map { it.rule.id })
+            own.forEach { saveRule(AutoRuleEntity(name = keyed.name, categoryId = category), it) }
+            val all = db.transactions().all()
+            val matcher = RecurringMatcher(keyed)
+            applyCategory(all.filter { !it.categoryLocked && it.transferPeerId == null && it.categoryId != category && matcher.matches(it) }.map { it.id }, category)
+            if (outdated.isNotEmpty()) {
+                // Was nur eine alte Regel in diese Kategorie gebracht hat und nicht mehr dazugehört, wird neu zugeordnet.
+                val reset = all.filter {
+                    it.categoryId == category && !it.categoryLocked && it.transferPeerId == null && !matcher.matches(it) &&
+                        outdated.any { rule -> RuleMatcher.matches(rule.conditions, it.counterparty, it.purpose, it.amountCents, it.accountId) }
+                }
+                if (reset.isNotEmpty()) {
+                    db.transactions().updateAll(reset.map { it.copy(categoryId = null) })
+                    enrich()
+                }
+            }
         } else if (category != null && key.isNotBlank()) {
-            val conditions = RuleMatcher.fromLearnKey(key, sign = if (keyed.matchKey.endsWith("|-")) -1 else 1)
+            val byKey = RuleMatcher.fromLearnKey(key, sign = if (keyed.matchKey.endsWith("|-")) -1 else 1)
+            val all = db.transactions().all()
+            val sameKey = all.filter { RecurringDetector.matchKey(it.toTx()) == keyed.matchKey }
+            // Andere Käufe beim selben Anbieter (etwa ein Zusatzpaket neben der Domain) behalten ihre eigene Kategorie:
+            // die Regel gilt dann nur für Beträge, die zu diesem Posten passen.
+            val others = sameKey.filter { !keyed.covers(it.amountCents) }
+            val conditions = if (others.isEmpty()) byKey else {
+                val range = keyed.coveredRange()
+                byKey + RuleCondition(RuleField.AMOUNT, RuleOp.AT_LEAST, range.first.toString()) +
+                    RuleCondition(RuleField.AMOUNT, RuleOp.AT_MOST, range.last.toString())
+            }
+            // Eine frühere Regel dieses Postens nur zum Anbieter (ohne Betrag) ersetzt die neue.
+            val outdated = loadRules().filter {
+                it.rule.categoryId == category && it.conditions.toSet() == byKey.toSet() && conditions != byKey
+            }
+            if (outdated.isNotEmpty()) db.rules().deleteByIds(outdated.map { it.rule.id })
             saveRule(AutoRuleEntity(name = keyed.name, categoryId = category), conditions)
-            val affected = db.transactions().all().filter { !it.categoryLocked }.matching(conditions, category)
+            val affected = all.filter { !it.categoryLocked }.matching(conditions, category)
             applyCategory(affected.map { it.id }, category)
+            if (outdated.isNotEmpty()) {
+                // Was nur die alte Regel in diese Kategorie gebracht hat, wird neu zugeordnet.
+                val reset = others.filter { it.categoryId == category && !it.categoryLocked && it.transferPeerId == null }
+                if (reset.isNotEmpty()) {
+                    db.transactions().updateAll(reset.map { it.copy(categoryId = null) })
+                    enrich()
+                }
+            }
         }
         id
     }
@@ -430,8 +482,10 @@ class FinanceRepository(
         )
 
     /** Buchungen, die zu einem Vertrag gehören. */
-    fun contractBookings(item: RecurringEntity, transactions: List<TransactionEntity>): List<Pair<LocalDate, Long>> =
-        transactions.filter { RecurringDetector.matchKey(it.toTx()) == item.matchKey }.map { it.bookingDate to it.amountCents }
+    fun contractBookings(item: RecurringEntity, transactions: List<TransactionEntity>): List<Pair<LocalDate, Long>> {
+        val matcher = RecurringMatcher(item)
+        return transactions.filter(matcher::matches).map { it.bookingDate to it.amountCents }
+    }
 
     /** Gleicht die Dauerposten mit der Umsatzhistorie ab: neue erkennen, Termine und Beträge fortschreiben. */
     suspend fun syncRecurring(today: LocalDate = LocalDate.now()) = db.withTransaction {
@@ -464,8 +518,8 @@ class FinanceRepository(
                     ),
                 )
                 old.dismissed -> Unit
-                // Ein Vertrag folgt seinem Zahlungsplan; die Erkennung schreibt ihn nicht um.
-                old.isContract -> Unit
+                // Ein Vertrag folgt seinem Zahlungsplan, eigene Regeln bestimmen ihre Buchungen selbst.
+                old.isContract || old.hasOwnRules -> Unit
                 else -> db.recurring().upsert(
                     old.copy(
                         amountCents = found.amountCents,
@@ -479,8 +533,8 @@ class FinanceRepository(
             }
         }
 
-        val latestByKey = txs.groupBy { RecurringDetector.matchKey(it) }
-            .mapValues { entry -> entry.value.maxOf { it.date } }
+        val byKey = txs.groupBy { RecurringDetector.matchKey(it) }
+        val latestByKey = byKey.mapValues { entry -> entry.value.maxOf { it.date } }
         for (old in existing) {
             if (old.isContract) {
                 val due = contractNextDue(old, everything, today)
@@ -507,7 +561,12 @@ class FinanceRepository(
                 continue
             }
             // Von Hand angelegt: Termin weiterschieben, sobald die passende Buchung da ist.
-            val latest = latestByKey[old.matchKey] ?: continue
+            val latest = if (old.hasOwnRules) {
+                val matcher = RecurringMatcher(old)
+                txs.filter(matcher::matches).maxOfOrNull { it.date }
+            } else {
+                byKey[old.matchKey]?.filter { old.covers(it.amountCents) }?.maxOfOrNull { it.date }
+            } ?: continue
             var due = old.nextDue
             while (due <= latest.plusDays(5)) due = old.interval.next(due)
             if (due != old.nextDue) db.recurring().upsert(old.copy(nextDue = due))

@@ -1,5 +1,6 @@
 package net.jandev.financialanalyst.data
 
+import net.jandev.financialanalyst.data.db.RecurringIndex
 import net.jandev.financialanalyst.data.db.AccountWithBalance
 import net.jandev.financialanalyst.data.db.RecurringEntity
 import net.jandev.financialanalyst.data.db.TransactionEntity
@@ -25,13 +26,13 @@ object BudgetCalculator {
         // Auch Spar-Abos in der Kartenabrechnung gehen vom Konto ab; erwartet werden sie zum Liefertermin. Ist die
         // Abrechnung gebucht, rückt ihr Termin weiter und es zählt nur noch die Abrechnung.
         val active = recurring.filter { it.active && !it.dismissed && (it.accountId == null || it.accountId in accountIds) }
-        val fixedKeys = active.map { it.matchKey }.toSet()
+        val fixed = RecurringIndex(active)
 
         // Heutige Buchungen, die keine Dauerposten sind: das ist das, was man heute „frei" ausgegeben hat.
         val todayVariableNet = transactions
             .asSequence()
             .filter { it.bookingDate == today && it.accountId in accountIds }
-            .filter { RecurringDetector.matchKey(it.toTx()) !in fixedKeys }
+            .filter { fixed.find(it) == null }
             .sumOf { it.amountCents }
 
         val period = Budget.period(today, settings.budgetStartDay)
