@@ -48,7 +48,7 @@ fun LegendDot(color: Color, label: String) {
 }
 
 /** Balken mit abgerundetem oberen Ende, unten bündig auf der Grundlinie. */
-private fun DrawScope.topRoundedBar(color: Color, left: Float, top: Float, width: Float, bottom: Float, radius: Float) {
+internal fun DrawScope.topRoundedBar(color: Color, left: Float, top: Float, width: Float, bottom: Float, radius: Float) {
     if (bottom - top <= 0f) return
     val r = minOf(radius, width / 2, bottom - top)
     val path = Path().apply {

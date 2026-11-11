@@ -115,11 +115,21 @@ Ohne Google-Einrichtung funktioniert die Sicherung als Datei (**Datei speichern 
   und Konditionen auf. Unter „Zugehörige
   Buchungen" wählt man, an welchen Buchungen der Posten erkannt wird.
 - **Analyse:** Kategorien und größte Empfänger lassen sich antippen und zeigen die zugehörigen Umsätze.
-- **Fixkosten:** getrennt nach monatlich, vierteljährlich, jährlich usw., jeweils mit Kategorie und Durchschnitt pro
-  Monat; Summen pro Monat, Quartal und Jahr; sortierbar nach Fälligkeit, Kosten oder Kategorie. Ein **Anzeigename**
+- **Fixkosten** in drei Reitern:
+  - **Überblick:** Summen pro Monat, Quartal und Jahr und wie viel der festen Einnahmen sie binden; Verteilung nach
+    Bereichen (Wohnen & Energie, Mobilität, Versicherungen, Kredite & Gebühren, Abos & Digitales, Leben & Alltag, Sparen,
+    Sonstiges), Kategorien oder Posten als Kreis-, Balken- oder Kacheldiagramm, antippbar bis zu den einzelnen Posten.
+    Der **Kündigungs-Check** listet kündbare Posten nach Jahreskosten und hebt hervor, was doppelt wirkt (zwei
+    Cloud-Speicher, mehrere Videodienste, Domains bei mehreren Anbietern), teurer geworden ist, bald zu kündigen ist oder
+    einen großen Teil ausmacht; Energie und Versicherungen stehen getrennt unter „Anbieter vergleichen".
+  - **Vorschau:** die Fixkosten der nächsten 24 Monate auf den Cent, als gestapelte Säulen nach Bereich mit
+    Durchschnittslinie; ein Monat zeigt alle Zahlungen mit Datum, im laufenden Monat schon gebuchte und noch fällige,
+    dazu feste Einnahmen, was bleibt, und Summen je Jahr.
+  - **Posten:** gruppiert nach Rhythmus, Kategorie oder Bereich, sortierbar nach Fälligkeit oder Kosten.
+
+  Jeder Posten zeigt Kategorie und Durchschnitt pro Monat. Ein **Anzeigename**
   dient nur der Anzeige und ändert nichts an der Zuordnung der Zahlungen. Ein erkannter Posten gilt als pausiert, wenn
   die erwartete Buchung mehr als sechs Wochen ausbleibt; er wird von selbst wieder aktiv, sobald eine kommt.
-  „Fixkosten im <Monat>" zeigt, was im laufenden Monat schon gebucht und noch fällig ist, seltene Zahlungen hervorgehoben.
   Monatszahlungen werden auch erkannt, wenn der Buchungstag schwankt (je Kalendermonat genau eine Buchung).
   Im Umsatz legt **Als Fixkosten anlegen …** einen Posten aus dieser und gleichen Buchungen an.
   **Welche Buchungen dazugehören:** automatisch gleicher Empfänger und ähnlicher Betrag (±30 %, mindestens 1 €), sodass

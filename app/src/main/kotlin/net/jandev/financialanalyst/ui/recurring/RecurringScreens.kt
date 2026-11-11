@@ -99,7 +99,20 @@ import kotlin.math.abs
 private enum class RecurringSort(val label: String) {
     DUE("Fälligkeit"),
     AMOUNT("Kosten"),
+}
+
+/** Wonach die Liste der Posten gruppiert ist. */
+private enum class Grouping(val label: String) {
+    INTERVAL("Rhythmus"),
     CATEGORY("Kategorie"),
+    AREA("Bereich"),
+}
+
+/** Reiter der Fixkosten-Seite. */
+private enum class FixedTab(val label: String) {
+    OVERVIEW("Überblick"),
+    FORECAST("Vorschau"),
+    ITEMS("Posten"),
 }
 
 /** Abschnitte in dieser Reihenfolge; die häufigen Rhythmen zuerst. */
@@ -136,6 +149,8 @@ fun RecurringScreen(onEdit: (Long) -> Unit) {
     val items by app.repository.recurring.collectAsStateWithLifecycle(initialValue = null)
     val categories by app.repository.categories.collectAsStateWithLifecycle(initialValue = emptyList())
     var sort by rememberSaveable { mutableStateOf(RecurringSort.DUE) }
+    var grouping by rememberSaveable { mutableStateOf(Grouping.INTERVAL) }
+    var tab by rememberSaveable { mutableStateOf(FixedTab.OVERVIEW) }
     val transactions by app.repository.transactions.collectAsStateWithLifecycle(initialValue = emptyList())
     val splits by app.repository.splits.collectAsStateWithLifecycle(initialValue = emptyList())
     val today = LocalDate.now()
@@ -164,180 +179,106 @@ fun RecurringScreen(onEdit: (Long) -> Unit) {
         fun ordered(list: List<RecurringEntity>) = when (sort) {
             RecurringSort.DUE -> list.sortedBy { it.nextDue }
             RecurringSort.AMOUNT -> list.sortedByDescending { it.yearlyCents() }
-            RecurringSort.CATEGORY -> list.sortedWith(
-                compareBy<RecurringEntity>({ categoryNames[it.categoryId] == null }, { categoryNames[it.categoryId]?.lowercase().orEmpty() })
-                    .thenByDescending { it.yearlyCents() },
-            )
         }
         val active = visible.filter { it.active }
-        val expenses = active.filter { it.amountCents < 0 }
-        val incomes = active.filter { it.amountCents > 0 }
+        val fixed = remember(active, categories) { fixedItems(active, categories) }
+        val fixedExpenses = fixed.filter { it.item.amountCents < 0 }
+        val fixedIncomes = fixed.filter { it.item.amountCents > 0 }
         val paused = ordered(visible.filter { !it.active })
-        val yearlyOut = expenses.sumOf { it.yearlyCents() }
-        val yearlyIn = incomes.sumOf { it.yearlyCents() }
 
         LazyColumn(
             modifier = Modifier.fillMaxSize().padding(padding),
             contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 8.dp, bottom = 96.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
-            item(key = "sum") {
-                SectionCard(title = "Fixkosten gesamt") {
-                    Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                        TotalFigure("pro Monat", yearlyOut / 12, Modifier.weight(1f))
-                        TotalFigure("pro Quartal", yearlyOut / 4, Modifier.weight(1f))
-                        TotalFigure("pro Jahr", yearlyOut, Modifier.weight(1f))
-                    }
-                    if (incomes.isNotEmpty()) {
-                        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
-                        LabeledRow("Feste Einnahmen pro Monat") { AmountText(yearlyIn / 12, withSign = false, colored = false) }
-                        LabeledRow("Bleibt nach Fixkosten pro Monat") { AmountText((yearlyIn - yearlyOut) / 12, negativeIsAlarming = true) }
-                    }
-                    Text(
-                        "Seltenere Zahlungen sind als Durchschnitt auf Monat, Quartal und Jahr umgerechnet.",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
-            }
-            item(key = "month") {
-                ThisMonthCard(expenses, transactions, splits, today, onEdit)
-            }
-            item(key = "sort") {
-                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Text("Sortieren", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    RecurringSort.entries.forEach { option ->
-                        FilterChip(selected = sort == option, onClick = { sort = option }, label = { Text(option.label) })
+            item(key = "tabs") {
+                SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()) {
+                    FixedTab.entries.forEachIndexed { index, option ->
+                        SegmentedButton(
+                            selected = tab == option,
+                            onClick = { tab = option },
+                            shape = SegmentedButtonDefaults.itemShape(index, FixedTab.entries.size),
+                        ) { Text(option.label) }
                     }
                 }
             }
-            for ((kind, list) in listOf("Ausgaben" to expenses, "Einnahmen" to incomes)) {
-                for ((interval, adjective) in sectionOrder) {
-                    val section = ordered(list.filter { it.interval == interval })
-                    if (section.isEmpty()) continue
-                    item(key = "$kind-$interval") {
-                        RecurringGroup(
-                            title = "$adjective $kind",
-                            sums = listOfNotNull(
-                                "${Money.format(section.sumOf { abs(it.amountCents) })} ${interval.perLabel()}"
-                                    .takeIf { interval != RecurrenceInterval.MONTHLY },
-                                "${Money.format(section.sumOf { it.yearlyCents() } / 12)} pro Monat",
-                            ).joinToString(" · "),
-                            items = section,
-                            today = today,
-                            categoryNames = categoryNames,
-                            onEdit = onEdit,
-                        )
+            when (tab) {
+                FixedTab.OVERVIEW -> {
+                    item(key = "sum") { OverviewSummaryCard(fixedExpenses, fixedIncomes) }
+                    item(key = "share") { DistributionCard(fixedExpenses, onEdit) }
+                    item(key = "cancel") { CancelCheckCard(fixedExpenses, today, onEdit) }
+                }
+                FixedTab.FORECAST -> {
+                    item(key = "forecast") { ForecastTab(fixedExpenses, fixedIncomes, transactions, splits, today, onEdit) }
+                }
+                FixedTab.ITEMS -> {
+                    item(key = "sort") {
+                        Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                Text("Gruppen", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                Grouping.entries.forEach { option ->
+                                    FilterChip(selected = grouping == option, onClick = { grouping = option }, label = { Text(option.label) })
+                                }
+                            }
+                            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                Text("Sortieren", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                RecurringSort.entries.forEach { option ->
+                                    FilterChip(selected = sort == option, onClick = { sort = option }, label = { Text(option.label) })
+                                }
+                            }
+                        }
+                    }
+                    for ((kind, list) in listOf("Ausgaben" to fixedExpenses, "Einnahmen" to fixedIncomes)) {
+                        // Abschnitte: nach Rhythmus wie bisher, sonst nach Kategorie oder Bereich, die teuersten zuerst.
+                        val sections: List<Pair<String, List<RecurringEntity>>> = when (grouping) {
+                            Grouping.INTERVAL -> sectionOrder.mapNotNull { (interval, adjective) ->
+                                list.filter { it.item.interval == interval }.takeIf { it.isNotEmpty() }
+                                    ?.let { group -> "$adjective $kind" to group.map { it.item } }
+                            }
+                            Grouping.CATEGORY -> list.groupBy { it.category }.entries
+                                .sortedByDescending { entry -> entry.value.sumOf { it.yearlyCents } }
+                                .map { (category, group) -> "${category?.name ?: "Ohne Kategorie"} · $kind" to group.map { it.item } }
+                            Grouping.AREA -> list.groupBy { it.area }.entries
+                                .sortedByDescending { entry -> entry.value.sumOf { it.yearlyCents } }
+                                .map { (area, group) -> "${area.label} · $kind" to group.map { it.item } }
+                        }
+                        for ((title, members) in sections) {
+                            val section = ordered(members)
+                            val interval = section.first().interval
+                            item(key = "$kind-$title") {
+                                RecurringGroup(
+                                    title = title,
+                                    sums = listOfNotNull(
+                                        "${Money.format(section.sumOf { abs(it.amountCents) })} ${interval.perLabel()}"
+                                            .takeIf { grouping == Grouping.INTERVAL && interval != RecurrenceInterval.MONTHLY },
+                                        "${Money.format(section.sumOf { it.yearlyCents() } / 12)} pro Monat",
+                                        "${Money.format(section.sumOf { it.yearlyCents() })} pro Jahr".takeIf { grouping != Grouping.INTERVAL },
+                                    ).joinToString(" · "),
+                                    items = section,
+                                    today = today,
+                                    categoryNames = categoryNames,
+                                    onEdit = onEdit,
+                                )
+                            }
+                        }
+                    }
+                    if (paused.isNotEmpty()) {
+                        item(key = "paused") {
+                            RecurringGroup(
+                                title = "Pausiert oder beendet",
+                                sums = null,
+                                items = paused,
+                                today = today,
+                                categoryNames = categoryNames,
+                                onEdit = onEdit,
+                                hint = "Hier landet ein automatisch erkannter Posten, wenn seine erwartete Buchung mehr als sechs Wochen ausbleibt. " +
+                                    "Kommt wieder eine, wird er von selbst aktiv. Stimmt die Einschätzung nicht, schalte ihn im Posten wieder auf „Aktiv“.",
+                            )
+                        }
                     }
                 }
             }
-            if (paused.isNotEmpty()) {
-                item(key = "paused") {
-                    RecurringGroup(
-                        title = "Pausiert oder beendet",
-                        sums = null,
-                        items = paused,
-                        today = today,
-                        categoryNames = categoryNames,
-                        onEdit = onEdit,
-                        hint = "Hier landet ein automatisch erkannter Posten, wenn seine erwartete Buchung mehr als sechs Wochen ausbleibt. " +
-                            "Kommt wieder eine, wird er von selbst aktiv. Stimmt die Einschätzung nicht, schalte ihn im Posten wieder auf „Aktiv“.",
-                    )
-                }
-            }
         }
-    }
-}
-
-/** Eine Zahlung im laufenden Monat: schon gebucht oder noch erwartet. */
-private data class MonthEntry(val item: RecurringEntity, val date: LocalDate, val cents: Long, val booked: Boolean)
-
-/** Was im laufenden Monat an Fixkosten anfällt – gerade auch seltene Zahlungen, die diesmal dran sind. */
-@Composable
-private fun ThisMonthCard(
-    expenses: List<RecurringEntity>,
-    transactions: List<TransactionEntity>,
-    splits: List<SplitEntity>,
-    today: LocalDate,
-    onEdit: (Long) -> Unit,
-) {
-    val entries = remember(expenses, transactions, splits, today) {
-        val start = today.withDayOfMonth(1)
-        val end = today.withDayOfMonth(today.lengthOfMonth())
-        val index = RecurringIndex(expenses)
-        val booked = transactions
-            .filter { it.bookingDate in start..today && it.transferPeerId == null && it.amountCents < 0 }
-            .mapNotNull { tx -> index.find(tx)?.let { MonthEntry(it, tx.bookingDate, tx.amountCents, booked = true) } } +
-            // Spar-Abos: die schon in eine Abrechnung eingetragenen Lieferungen dieses Monats.
-            expenses.filter { it.isPosition }.flatMap { item ->
-                splits.filter { it.recurringId == item.id && it.date in start..end }.map { MonthEntry(item, it.date, it.amountCents, booked = true) }
-            }
-        val due = expenses.flatMap { item ->
-            if (item.isContract) {
-                // Offene Vertragsbeiträge mit ihrem eigentlichen Termin, auch wenn er vor diesem Monat lag.
-                ContractSchedule.openDues(item.plan(), end).map { MonthEntry(item, it.date, it.amountCents, booked = false) }
-            } else {
-                Budget.plannedFlows(listOf(item.plan()), today, end).map { MonthEntry(item, it.date, it.amountCents, booked = false) }
-            }
-        }
-        (booked + due).sortedBy { it.date }
-    }
-    val monthName = today.format(DateTimeFormatter.ofPattern("MMMM", Locale.GERMAN))
-    SectionCard(title = "Fixkosten im $monthName") {
-        if (entries.isEmpty()) {
-            Text("In diesem Monat ist nichts fällig.", style = MaterialTheme.typography.bodyMedium)
-            return@SectionCard
-        }
-        val bookedSum = entries.filter { it.booked }.sumOf { -it.cents }
-        val dueSum = entries.filter { !it.booked }.sumOf { -it.cents }
-        Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-            TotalFigure("schon gebucht", bookedSum, Modifier.weight(1f))
-            TotalFigure("noch fällig", dueSum, Modifier.weight(1f))
-            TotalFigure("ganzer Monat", bookedSum + dueSum, Modifier.weight(1f))
-        }
-        val rare = entries.filter { it.item.interval != RecurrenceInterval.MONTHLY && it.item.interval.months > 1 }
-        if (rare.isNotEmpty()) {
-            Text(
-                "Diesen Monat zusätzlich dran: " + rare.distinctBy { it.item.id }.joinToString { "${it.item.displayName} (${it.item.interval.label})" },
-                style = MaterialTheme.typography.bodySmall,
-                color = LocalFinanceColors.current.warning,
-            )
-        }
-        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
-        entries.forEach { entry ->
-            Row(
-                modifier = Modifier.fillMaxWidth().clickable { onEdit(entry.item.id) }.padding(vertical = 4.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Column(Modifier.weight(1f).padding(end = 12.dp)) {
-                    Text(entry.item.displayName, style = MaterialTheme.typography.bodyMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                    Text(
-                        listOfNotNull(
-                            when {
-                                entry.item.isPosition && entry.booked -> "geliefert am ${entry.date.dayMonthLabel()}"
-                                entry.item.isPosition -> "Lieferung am ${entry.date.dayMonthLabel()}"
-                                entry.booked -> "gebucht am ${entry.date.dayMonthLabel()}"
-                                entry.date < today -> "offen seit ${entry.date.shortLabel()}"
-                                else -> "fällig am ${entry.date.dayMonthLabel()}"
-                            },
-                            "über Kartenabrechnung".takeIf { entry.item.isPosition },
-                            entry.item.interval.label.takeIf { entry.item.interval != RecurrenceInterval.MONTHLY },
-                        ).joinToString(" · "),
-                        style = MaterialTheme.typography.bodySmall,
-                        color = if (entry.item.interval.months > 1) LocalFinanceColors.current.warning else MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
-                AmountText(entry.cents, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.alpha(if (entry.booked) 0.6f else 1f))
-            }
-        }
-    }
-}
-
-@Composable
-private fun TotalFigure(label: String, cents: Long, modifier: Modifier = Modifier) {
-    Column(modifier) {
-        Text(label, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-        AmountText(cents, style = MaterialTheme.typography.titleMedium, withSign = false, colored = false)
     }
 }
 
