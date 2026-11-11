@@ -47,6 +47,7 @@ import kotlinx.coroutines.launch
 import net.jandev.financialanalyst.data.db.RecurringEntity
 import net.jandev.financialanalyst.data.db.GroupEntity
 import net.jandev.financialanalyst.data.db.TransactionEntity
+import net.jandev.financialanalyst.data.db.SplitEntity
 import net.jandev.financialanalyst.domain.Budget
 import net.jandev.financialanalyst.domain.RecurringPlan
 import androidx.compose.ui.draw.alpha
@@ -115,6 +116,7 @@ fun RecurringScreen(onEdit: (Long) -> Unit) {
     val categories by app.repository.categories.collectAsStateWithLifecycle(initialValue = emptyList())
     var sort by rememberSaveable { mutableStateOf(RecurringSort.DUE) }
     val transactions by app.repository.transactions.collectAsStateWithLifecycle(initialValue = emptyList())
+    val splits by app.repository.splits.collectAsStateWithLifecycle(initialValue = emptyList())
     val today = LocalDate.now()
     val categoryNames = remember(categories) { categories.associate { it.id to it.name } }
 
@@ -178,7 +180,7 @@ fun RecurringScreen(onEdit: (Long) -> Unit) {
                 }
             }
             item(key = "month") {
-                ThisMonthCard(expenses.filter { !it.isPosition }, transactions, today, onEdit)
+                ThisMonthCard(expenses, transactions, splits, today, onEdit)
             }
             item(key = "sort") {
                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -234,16 +236,21 @@ private data class MonthEntry(val item: RecurringEntity, val date: LocalDate, va
 private fun ThisMonthCard(
     expenses: List<RecurringEntity>,
     transactions: List<TransactionEntity>,
+    splits: List<SplitEntity>,
     today: LocalDate,
     onEdit: (Long) -> Unit,
 ) {
-    val entries = remember(expenses, transactions, today) {
+    val entries = remember(expenses, transactions, splits, today) {
         val start = today.withDayOfMonth(1)
         val end = today.withDayOfMonth(today.lengthOfMonth())
         val byKey = expenses.filter { it.matchKey.isNotBlank() }.associateBy { it.matchKey }
         val booked = transactions
             .filter { it.bookingDate in start..today && it.transferPeerId == null && it.amountCents < 0 }
-            .mapNotNull { tx -> byKey[RecurringDetector.matchKey(tx.toTx())]?.let { MonthEntry(it, tx.bookingDate, tx.amountCents, booked = true) } }
+            .mapNotNull { tx -> byKey[RecurringDetector.matchKey(tx.toTx())]?.let { MonthEntry(it, tx.bookingDate, tx.amountCents, booked = true) } } +
+            // Spar-Abos: die schon in eine Abrechnung eingetragenen Lieferungen dieses Monats.
+            expenses.filter { it.isPosition }.flatMap { item ->
+                splits.filter { it.recurringId == item.id && it.date in start..end }.map { MonthEntry(item, it.date, it.amountCents, booked = true) }
+            }
         val due = expenses.flatMap { item ->
             Budget.plannedFlows(listOf(RecurringPlan(item.displayName, item.amountCents, item.interval, item.nextDue)), today, end)
                 .map { MonthEntry(item, it.date, it.amountCents, booked = false) }
@@ -281,7 +288,13 @@ private fun ThisMonthCard(
                     Text(entry.item.displayName, style = MaterialTheme.typography.bodyMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
                     Text(
                         listOfNotNull(
-                            if (entry.booked) "gebucht am ${entry.date.dayMonthLabel()}" else "fällig am ${entry.date.dayMonthLabel()}",
+                            when {
+                                entry.item.isPosition && entry.booked -> "geliefert am ${entry.date.dayMonthLabel()}"
+                                entry.item.isPosition -> "Lieferung am ${entry.date.dayMonthLabel()}"
+                                entry.booked -> "gebucht am ${entry.date.dayMonthLabel()}"
+                                else -> "fällig am ${entry.date.dayMonthLabel()}"
+                            },
+                            "über Kartenabrechnung".takeIf { entry.item.isPosition },
                             entry.item.interval.label.takeIf { entry.item.interval != RecurrenceInterval.MONTHLY },
                         ).joinToString(" · "),
                         style = MaterialTheme.typography.bodySmall,

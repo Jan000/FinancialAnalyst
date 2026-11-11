@@ -98,7 +98,9 @@ Ohne Google-Einrichtung funktioniert die Sicherung als Datei (**Datei speichern 
   ersetzen die Positionen den Umsatz, der nicht aufgeteilte Rest bleibt bei ihm. In der Umsatzliste stehen sie
   eingerückt unter ihrem Umsatz. Rabatte und eingelöste Prämienpunkte trägt man als **Gutschrift** ein; sie mindern
   die Summe der Käufe. Kategorie und Gruppe lassen sich im Positionsdialog auch neu anlegen. **Wiederholt sich** (etwa ein Amazon-Spar-Abo) legt einen Posten in den Fixkosten an;
-  jede weitere Lieferung wird automatisch in die erste Abrechnung am oder nach ihrem Termin eingetragen.
+  jede weitere Lieferung wird automatisch in die erste Abrechnung am oder nach ihrem Termin eingetragen. Spar-Abos
+  zählen wie andere Fixkosten in Monatsübersicht, Tagesbudget und Kontoprognose – erwartet zum Liefertermin auf dem
+  Konto der Abrechnung; ist die Abrechnung gebucht, zählt nur noch sie.
 - **Analyse:** Kategorien und größte Empfänger lassen sich antippen und zeigen die zugehörigen Umsätze.
 - **Fixkosten:** getrennt nach monatlich, vierteljährlich, jährlich usw., jeweils mit Kategorie und Durchschnitt pro
   Monat; Summen pro Monat, Quartal und Jahr; sortierbar nach Fälligkeit, Kosten oder Kategorie. Ein **Anzeigename**
