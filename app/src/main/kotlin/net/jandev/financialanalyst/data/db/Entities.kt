@@ -272,6 +272,23 @@ class RecurringMatcher(val item: RecurringEntity) {
     fun matches(tx: TransactionEntity): Boolean = matches(tx.toTx())
 }
 
+/**
+ * Ob ein neu angelegter Posten den bestehenden [old] ersetzt statt neben ihm zu stehen: gleicher Schlüssel, und seine
+ * Zuordnung nimmt auch den Betrag von [old] an. Ein zweiter Vertrag beim selben Anbieter mit anderem Betrag bleibt
+ * ein eigener Posten; einen mit eigenen Regeln ersetzt nur einer, dessen Regeln dessen Betrag ebenfalls treffen.
+ */
+fun RecurringEntity.takesOver(old: RecurringEntity): Boolean {
+    if (old.isPosition || isPosition || old.matchKey.isBlank() || old.matchKey != matchKey) return false
+    val rules = MatchRules.decode(matchRules)
+    // Auch ein Vertrag (der sonst jede Buchung seines Schlüssels nimmt) vergleicht hier den Betrag.
+    val fits = if (rules.isNotEmpty()) MatchRules.matches(rules, old.name, "", old.amountCents, old.accountId ?: -1)
+    else copy(firstDue = null).covers(old.amountCents)
+    if (!fits) return false
+    if (!old.hasOwnRules) return true
+    // Die eigenen Regeln von [old] müssen umgekehrt auch diesen Posten treffen.
+    return MatchRules.matches(MatchRules.decode(old.matchRules), name, "", amountCents, accountId ?: -1)
+}
+
 /** Ordnet Buchungen ihrem Dauerposten zu; Posten mit eigenen Regeln gehen vor. */
 class RecurringIndex(items: List<RecurringEntity>) {
     private val custom = items.filter { it.hasOwnRules && !it.isPosition }.map(::RecurringMatcher).filter { it.rules.isNotEmpty() }

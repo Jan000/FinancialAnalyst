@@ -2,6 +2,7 @@ package net.jandev.financialanalyst.data
 
 import net.jandev.financialanalyst.domain.MatchRules
 import net.jandev.financialanalyst.data.db.RecurringMatcher
+import net.jandev.financialanalyst.data.db.takesOver
 import net.jandev.financialanalyst.data.db.RecurringIndex
 import androidx.room.withTransaction
 import kotlinx.coroutines.flow.Flow
@@ -358,8 +359,9 @@ class FinanceRepository(
             item.detected || item.matchKey.isNotBlank() -> item
             else -> item.copy(matchKey = RecurringDetector.matchKey(item.name, item.amountCents))
         }
-        // Gibt es für diese Zahlung schon einen Posten (etwa einen erkannten), wird er übernommen statt verdoppelt.
-        val twin = if (withKey.id == 0L) db.recurring().all().firstOrNull { it.matchKey == withKey.matchKey } else null
+        // Gibt es für diese Zahlung schon einen Posten (etwa einen erkannten), wird er übernommen statt verdoppelt –
+        // aber nur, wenn er dieselben Buchungen meint: zwei Verträge beim selben Anbieter bleiben getrennt.
+        val twin = if (withKey.id == 0L) db.recurring().all().firstOrNull { withKey.takesOver(it) } else null
         val merged = if (twin != null) withKey.copy(id = twin.id, detected = false, dismissed = false) else withKey
         // Vertrag: der nächste Termin ergibt sich aus Zahlungsplan und Buchungen, nicht aus der Eingabe.
         val keyed = if (merged.isContract) merged.copy(nextDue = contractNextDue(merged, db.transactions().all())) else merged
@@ -373,9 +375,12 @@ class FinanceRepository(
             // Eigene Regeln: jede wird zu einer Kategorie-Regel; die bisherigen Regeln dieses Postens ersetzen sie.
             val own = MatchRules.decode(keyed.matchRules)
             val byKey = if (key.isNotBlank()) RuleMatcher.fromLearnKey(key, sign = if (keyed.matchKey.endsWith("|-")) -1 else 1) else emptyList()
+            // Regeln anderer Posten mit eigenen Regeln (etwa ein zweiter Vertrag beim selben Anbieter) bleiben.
+            val foreign = db.recurring().all().filter { it.id != id && it.hasOwnRules }
+                .flatMap { MatchRules.decode(it.matchRules) }.map { it.toSet() }.toSet()
             val outdated = loadRules().filter {
                 it.rule.categoryId == category && (it.rule.name == keyed.name || it.conditions.toSet() == byKey.toSet()) &&
-                    own.none { rule -> rule.toSet() == it.conditions.toSet() }
+                    own.none { rule -> rule.toSet() == it.conditions.toSet() } && it.conditions.toSet() !in foreign
             }
             if (outdated.isNotEmpty()) db.rules().deleteByIds(outdated.map { it.rule.id })
             own.forEach { saveRule(AutoRuleEntity(name = keyed.name, categoryId = category), it) }
