@@ -60,6 +60,7 @@ import net.jandev.financialanalyst.ui.common.LocalApp
 import net.jandev.financialanalyst.ui.common.MoneyField
 import net.jandev.financialanalyst.ui.common.SectionCard
 import net.jandev.financialanalyst.ui.common.dayMonthLabel
+import net.jandev.financialanalyst.ui.common.shortLabel
 import net.jandev.financialanalyst.ui.common.toFieldText
 import net.jandev.financialanalyst.ui.theme.LocalFinanceColors
 import java.time.LocalDate
@@ -174,6 +175,19 @@ private fun SplitDialog(
     var repeat by rememberSaveable { mutableStateOf(split.recurringId != null) }
     var interval by rememberSaveable { mutableStateOf<RecurrenceInterval?>(null) }
     val chosenInterval = interval ?: template?.interval ?: RecurrenceInterval.MONTHLY
+    // Über welche Abrechnung das Abo künftig läuft, etwa nach einem Kartenwechsel; sonst über diese.
+    val transactions by app.repository.transactions.collectAsStateWithLifecycle(initialValue = emptyList())
+    val ownKey = remember(parent) { RecurringDetector.matchKey(parent.toTx()) }
+    var settlementKey by rememberSaveable { mutableStateOf<String?>(null) }
+    val chosenSettlement = settlementKey ?: template?.parentKey ?: ownKey
+    val allSplits by app.repository.splits.collectAsStateWithLifecycle(initialValue = emptyList())
+    val settlements = remember(transactions, chosenSettlement, allSplits, recurring) {
+        settlementOptions(transactions, chosenSettlement, settlementKeysInUse(transactions, allSplits.map { it.parentId }.toSet(), recurring))
+    }
+    var nextDay by rememberSaveable { mutableStateOf<Long?>(null) }
+    val chosenNext = nextDay?.let(LocalDate::ofEpochDay)
+        ?: template?.nextDue?.takeIf { interval == null }
+        ?: chosenInterval.next(LocalDate.ofEpochDay(day))
     val cents = Money.parse(amount)?.let(::abs)
     val selectable = remember(categories, credit, parentIsExpense) {
         // Eine Gutschrift mindert eine Ausgabenkategorie (Rabatt) oder ist eine Einnahme (Prämie): beide Arten zur Wahl.
@@ -275,9 +289,9 @@ private fun SplitDialog(
                 ) {
                     Checkbox(checked = repeat, onCheckedChange = { repeat = it })
                     Column {
-                        Text("Wiederholt sich (z. B. Spar-Abo)", style = MaterialTheme.typography.bodyMedium)
+                        Text("Wiederholt sich (Spar-Abo, Jahresabo)", style = MaterialTheme.typography.bodyMedium)
                         Text(
-                            "Künftige Lieferungen werden automatisch in die jeweils nächste Abrechnung eingetragen.",
+                            "Künftige Termine werden automatisch in die jeweils nächste Abrechnung eingetragen.",
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
@@ -285,12 +299,27 @@ private fun SplitDialog(
                 }
                 if (repeat) {
                     DropdownField(
-                        label = "Liefert",
+                        label = "Wiederholung",
                         options = POSITION_INTERVALS,
                         selected = chosenInterval,
-                        onSelect = { interval = it },
+                        onSelect = { interval = it; nextDay = null },
                         optionLabel = { if (it == RecurrenceInterval.MONTHLY) "Jeden Monat" else it.label.replaceFirstChar(Char::uppercase) },
                     )
+                    DateField(date = chosenNext, onDateChange = { nextDay = it.toEpochDay() }, label = "Nächster Termin")
+                    DropdownField(
+                        label = "Abgerechnet über",
+                        options = settlements,
+                        selected = settlements.firstOrNull { it.key == chosenSettlement },
+                        onSelect = { settlementKey = it.key },
+                        optionLabel = { it.label },
+                    )
+                    if (chosenSettlement != ownKey) {
+                        Text(
+                            "Künftige Termine landen in dieser Abrechnung, etwa nach einem Wechsel der Zahlungsart.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
                 }
                 if (split.id != 0L) {
                     TextButton(onClick = {
@@ -316,18 +345,23 @@ private fun SplitDialog(
                                     name = description.trim().ifBlank { "Position" },
                                     amountCents = signed,
                                     interval = chosenInterval,
-                                    // Diese Lieferung steht schon hier; als Nächstes kommt die folgende.
-                                    nextDue = chosenInterval.next(date),
-                                    accountId = parent.accountId,
+                                    // Dieser Termin steht schon hier; als Nächstes kommt der folgende.
+                                    nextDue = chosenNext,
+                                    accountId = settlements.firstOrNull { it.key == chosenSettlement }?.accountId ?: parent.accountId,
                                     categoryId = categoryId,
                                     groupId = groupId,
-                                    parentKey = RecurringDetector.matchKey(parent.toTx()),
+                                    parentKey = chosenSettlement,
                                 ),
                             )
                             repeat && template != null -> {
-                                if (template.interval != chosenInterval || !template.active) {
-                                    app.repository.saveRecurring(template.copy(interval = chosenInterval, active = true))
-                                }
+                                val updated = template.copy(
+                                    interval = chosenInterval,
+                                    active = true,
+                                    nextDue = chosenNext,
+                                    parentKey = chosenSettlement,
+                                    accountId = settlements.firstOrNull { it.key == chosenSettlement }?.accountId ?: template.accountId,
+                                )
+                                if (updated != template) app.repository.saveRecurring(updated)
                                 template.id
                             }
                             // Abgewählt: das Spar-Abo läuft nicht mehr; bisher eingetragene Lieferungen bleiben.
@@ -369,7 +403,50 @@ private val POSITION_INTERVALS = listOf(
     RecurrenceInterval.FOUR_MONTHLY,
     RecurrenceInterval.FIVE_MONTHLY,
     RecurrenceInterval.HALF_YEARLY,
+    RecurrenceInterval.YEARLY,
 )
+
+/** Eine Sammelabrechnung, über die wiederkehrende Positionen laufen können. */
+data class SettlementOption(val key: String, val label: String, val accountId: Long)
+
+/**
+ * Abrechnungen zur Wahl für wiederkehrende Positionen: zuerst [current] und die, die schon Positionen haben
+ * ([withPositions]), dann Kartenabrechnungen, danach weitere mehrfach vorkommende Abbuchungen nach Datum.
+ */
+fun settlementOptions(
+    transactions: List<TransactionEntity>,
+    current: String,
+    withPositions: Set<String> = emptySet(),
+): List<SettlementOption> {
+    val all = transactions
+        .filter { it.amountCents < 0 && it.id > 0 }
+        .groupBy { RecurringDetector.matchKey(it.toTx()) }
+        .filter { (key, txs) -> txs.size >= 2 || key == current }
+        .map { (key, txs) ->
+            val latest = txs.maxBy { it.bookingDate }
+            val name = latest.counterparty.ifBlank { latest.purpose.take(40) }.ifBlank { "Ohne Buchungstext" }
+            val rank = when {
+                key == current -> 0
+                key in withPositions -> 1
+                CARD_SETTLEMENT.containsMatchIn("$name ${latest.purpose}") -> 2
+                else -> 3
+            }
+            Triple(SettlementOption(key, "$name (zuletzt ${latest.bookingDate.let { if (it.year == LocalDate.now().year) it.dayMonthLabel() else it.shortLabel() }})", latest.accountId), rank, latest.bookingDate)
+        }
+        .sortedWith(compareBy<Triple<SettlementOption, Int, LocalDate>> { it.second }.thenByDescending { it.third })
+    return all.take(40).map { it.first }
+}
+
+/** Woran eine Kreditkarten- oder Sammelabrechnung zu erkennen ist. */
+private val CARD_SETTLEMENT = Regex(
+    "kreditkart|visa|mastercard|american express|amex|zinia|barclaycard|hanseatic|advanzia|klarna|abrechnung",
+    RegexOption.IGNORE_CASE,
+)
+
+/** Schlüssel der Abrechnungen, die schon Positionen oder wiederkehrende Positionen haben. */
+fun settlementKeysInUse(transactions: List<TransactionEntity>, splitParents: Set<Long>, templates: List<RecurringEntity>): Set<String> =
+    transactions.filter { it.id in splitParents }.map { RecurringDetector.matchKey(it.toTx()) }.toSet() +
+        templates.filter { it.isPosition }.map { it.parentKey }
 
 /** Eine Position eingerückt unter ihrem Umsatz in der Umsatzliste. */
 @Composable

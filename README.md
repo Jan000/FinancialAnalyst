@@ -99,7 +99,10 @@ Ohne Google-Einrichtung funktioniert die Sicherung als Datei (**Datei speichern 
   ersetzen die Positionen den Umsatz, der nicht aufgeteilte Rest bleibt bei ihm. In der Umsatzliste stehen sie
   eingerückt unter ihrem Umsatz. Rabatte und eingelöste Prämienpunkte trägt man als **Gutschrift** ein; sie mindern
   die Summe der Käufe. Kategorie und Gruppe lassen sich im Positionsdialog auch neu anlegen. **Wiederholt sich** (etwa ein Amazon-Spar-Abo) legt einen Posten in den Fixkosten an;
-  jede weitere Lieferung wird automatisch in die erste Abrechnung am oder nach ihrem Termin eingetragen. Spar-Abos
+  jede weitere Lieferung wird automatisch in die erste Abrechnung am oder nach ihrem Termin eingetragen. Möglich sind
+  Rhythmen von monatlich bis jährlich (etwa ein Prime-Jahresabo); nächster Termin und **Abgerechnet über** lassen sich
+  festlegen, sodass ein Abo nach einem Wechsel der Zahlungsart künftig in die Abrechnung der anderen Karte wandert.
+  Bisher eingetragene Termine bleiben in ihrer Abrechnung. Spar-Abos
   zählen wie andere Fixkosten in Monatsübersicht, Tagesbudget und Kontoprognose – erwartet zum Liefertermin auf dem
   Konto der Abrechnung; ist die Abrechnung gebucht, zählt nur noch sie.
 - **Zahlungsplan laut Vertrag** (im Dauerposten): für Versicherungen und andere Verträge mit festen Terminen. Erster

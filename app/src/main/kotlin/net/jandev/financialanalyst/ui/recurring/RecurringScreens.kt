@@ -1,5 +1,9 @@
 package net.jandev.financialanalyst.ui.recurring
 
+import net.jandev.financialanalyst.ui.transactions.settlementKeysInUse
+
+import net.jandev.financialanalyst.ui.transactions.settlementOptions
+
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -459,6 +463,7 @@ fun RecurringEditScreen(itemId: Long, onDone: () -> Unit, fromTransactionId: Lon
     var changesText by rememberSaveable { mutableStateOf("") }
     var editingDue by remember { mutableStateOf<Installment?>(null) }
     var note by rememberSaveable { mutableStateOf("") }
+    var parentKey by rememberSaveable { mutableStateOf("") }
 
     LaunchedEffect(itemId) {
         if (itemId == 0L) return@LaunchedEffect
@@ -482,6 +487,7 @@ fun RecurringEditScreen(itemId: Long, onDone: () -> Unit, fromTransactionId: Lon
             firstDue = (item.firstDue ?: item.nextDue).toEpochDay()
             changesText = item.scheduleChanges
             note = item.note
+            parentKey = item.parentKey
             ready = true
         }
     }
@@ -583,13 +589,30 @@ fun RecurringEditScreen(itemId: Long, onDone: () -> Unit, fromTransactionId: Lon
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
             loaded?.takeIf { it.isPosition }?.let { item ->
-                val settlement = transactions.lastOrNull { RecurringDetector.matchKey(it.toTx()) == item.parentKey }
                 Text(
-                    "Wird automatisch als Position in die Abrechnung „${settlement?.counterparty ?: "Sammelabrechnung"}“ eingetragen, " +
-                        "sobald diese nach dem Termin gebucht ist. Auf dem Konto zählt nur die Abrechnung selbst.",
+                    "Wird automatisch als Position in die gewählte Abrechnung eingetragen, sobald diese nach dem Termin " +
+                        "gebucht ist. Auf dem Konto zählt nur die Abrechnung selbst.",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
+                val allSplits by app.repository.splits.collectAsStateWithLifecycle(initialValue = emptyList())
+                val settlements = remember(transactions, parentKey, allSplits, recurringItems) {
+                    settlementOptions(transactions, parentKey, settlementKeysInUse(transactions, allSplits.map { it.parentId }.toSet(), recurringItems))
+                }
+                DropdownField(
+                    label = "Abgerechnet über",
+                    options = settlements,
+                    selected = settlements.firstOrNull { it.key == parentKey },
+                    onSelect = { parentKey = it.key },
+                    optionLabel = { it.label },
+                )
+                if (parentKey != item.parentKey) {
+                    Text(
+                        "Künftige Termine landen in dieser Abrechnung; bisher eingetragene bleiben, wo sie sind.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
                 if (groups.isNotEmpty()) {
                     val none = GroupEntity(id = 0, name = "Keine Gruppe")
                     DropdownField(
@@ -757,6 +780,10 @@ fun RecurringEditScreen(itemId: Long, onDone: () -> Unit, fromTransactionId: Lon
                         firstDue = if (isContract) LocalDate.ofEpochDay(firstDue) else null,
                         scheduleChanges = if (isContract) changesText else "",
                         note = note.trim(),
+                        parentKey = if (base.isPosition) parentKey else base.parentKey,
+                        accountId = if (base.isPosition && parentKey != base.parentKey) {
+                            transactions.lastOrNull { RecurringDetector.matchKey(it.toTx()) == parentKey }?.accountId ?: base.accountId
+                        } else base.accountId,
                         // Ein Vertrag folgt seinem Plan; die Erkennung schreibt ihn nicht mehr fort.
                         detected = base.detected && !isContract,
                     )
