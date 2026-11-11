@@ -62,7 +62,7 @@ import java.time.LocalDate
 fun rememberBudgetStatus(today: LocalDate): List<BudgetStatus> {
     val app = LocalApp.current
     val budgets by app.repository.budgets.collectAsStateWithLifecycle(initialValue = emptyList())
-    val transactions by app.repository.transactions.collectAsStateWithLifecycle(initialValue = emptyList())
+    val transactions by app.repository.analysisTransactions.collectAsStateWithLifecycle(initialValue = emptyList())
     val categories by app.repository.categories.collectAsStateWithLifecycle(initialValue = emptyList())
     val settings by app.settings.settings.collectAsStateWithLifecycle(initialValue = Settings())
     return remember(budgets, transactions, categories, settings, today) {

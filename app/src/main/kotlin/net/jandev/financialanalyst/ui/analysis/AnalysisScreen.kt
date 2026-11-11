@@ -66,7 +66,7 @@ fun AnalysisScreen(
     onOpenMerchant: (key: String, from: LocalDate, to: LocalDate) -> Unit = { _, _, _ -> },
 ) {
     val app = LocalApp.current
-    val transactions by app.repository.transactions.collectAsStateWithLifecycle(initialValue = null)
+    val transactions by app.repository.analysisTransactions.collectAsStateWithLifecycle(initialValue = null)
     val categories by app.repository.categories.collectAsStateWithLifecycle(initialValue = emptyList())
     var period by rememberSaveable { mutableStateOf(Period.MONTH) }
     var anchorDay by rememberSaveable { mutableStateOf(LocalDate.now().toEpochDay()) }

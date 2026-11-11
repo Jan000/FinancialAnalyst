@@ -19,6 +19,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import net.jandev.financialanalyst.data.toTx
+import net.jandev.financialanalyst.data.editTargetId
+import net.jandev.financialanalyst.data.isSplitPart
 import net.jandev.financialanalyst.domain.Analytics
 import net.jandev.financialanalyst.domain.CategoryKind
 import net.jandev.financialanalyst.domain.Money
@@ -47,7 +49,7 @@ fun CategoryTransactionsScreen(
     merchantKey: String? = null,
 ) {
     val app = LocalApp.current
-    val transactions by app.repository.transactions.collectAsStateWithLifecycle(initialValue = null)
+    val transactions by app.repository.analysisTransactions.collectAsStateWithLifecycle(initialValue = null)
     val categories by app.repository.categories.collectAsStateWithLifecycle(initialValue = emptyList())
     val accounts by app.repository.accounts.collectAsStateWithLifecycle(initialValue = emptyList())
     var pickingId by rememberSaveable { mutableStateOf<Long?>(null) }
@@ -116,7 +118,8 @@ fun CategoryTransactionsScreen(
                         if (merchantKey != null) categoryNames[tx.categoryId] ?: "Ohne Kategorie" else null,
                         accountNames[tx.accountId],
                     ).joinToString(" · "),
-                    onClick = { pickingId = tx.id },
+                    // Eine Position bearbeitet man in ihrem Umsatz.
+                    onClick = { if (tx.isSplitPart) onEdit(tx.editTargetId) else pickingId = tx.id },
                 )
             }
         }

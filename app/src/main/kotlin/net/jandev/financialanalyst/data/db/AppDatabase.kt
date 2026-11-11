@@ -37,8 +37,9 @@ class Converters {
         BudgetEntity::class,
         SavingsGoalEntity::class,
         BankSessionEntity::class,
+        SplitEntity::class,
     ],
-    version = 5,
+    version = 6,
     exportSchema = false,
 )
 @TypeConverters(Converters::class)
@@ -51,6 +52,7 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun planning(): PlanningDao
     abstract fun bankSessions(): BankSessionDao
     abstract fun groups(): GroupDao
+    abstract fun splits(): SplitDao
     abstract fun rules(): RuleDao
 
     companion object {
@@ -77,6 +79,20 @@ abstract class AppDatabase : RoomDatabase() {
                     "CREATE TABLE IF NOT EXISTS `tx_groups` (`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, " +
                         "`name` TEXT NOT NULL, `colorIndex` INTEGER NOT NULL, `note` TEXT NOT NULL)",
                 )
+            }
+        }
+
+        /** Positionen innerhalb eines Umsatzes und wiederkehrende Positionen (Spar-Abos). */
+        private val MIGRATION_5_6 = object : Migration(5, 6) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    "CREATE TABLE IF NOT EXISTS `tx_splits` (`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, `parentId` INTEGER NOT NULL, " +
+                        "`date` INTEGER NOT NULL, `amountCents` INTEGER NOT NULL, `description` TEXT NOT NULL, `categoryId` INTEGER, " +
+                        "`groupId` INTEGER, `recurringId` INTEGER, FOREIGN KEY(`parentId`) REFERENCES `transactions`(`id`) ON UPDATE NO ACTION ON DELETE CASCADE )",
+                )
+                db.execSQL("CREATE INDEX IF NOT EXISTS `index_tx_splits_parentId` ON `tx_splits` (`parentId`)")
+                db.execSQL("ALTER TABLE `recurring` ADD COLUMN `parentKey` TEXT NOT NULL DEFAULT ''")
+                db.execSQL("ALTER TABLE `recurring` ADD COLUMN `groupId` INTEGER")
             }
         }
 
@@ -126,7 +142,7 @@ abstract class AppDatabase : RoomDatabase() {
 
         fun open(context: Context): AppDatabase =
             Room.databaseBuilder(context, AppDatabase::class.java, FILE_NAME)
-                .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5)
+                .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6)
                 .build()
     }
 }

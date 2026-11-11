@@ -93,6 +93,11 @@ Ohne Google-Einrichtung funktioniert die Sicherung als Datei (**Datei speichern 
   Dauerposten für die nächsten 31 Tage. Eine Umbuchung
   steht als eine Zeile („N26 → Tagesgeld", Betrag ohne Vorzeichen); ein Kauf über PayPal als der Kauf selbst mit
   „PayPal über N26". Die jeweils andere Buchung ist im Umsatz unter „Gegenbuchung" bzw. „Bezahlt über" erreichbar.
+- **Positionen** (im Umsatz unter „Enthaltene Positionen"): einen Umsatz wie die Kreditkartenabrechnung in Einzelkäufe
+  aufteilen, jeder mit eigener Kategorie und Gruppe. Am Kontostand ändert sich nichts; in Analyse, Budgets und Gruppen
+  ersetzen die Positionen den Umsatz, der nicht aufgeteilte Rest bleibt bei ihm. In der Umsatzliste stehen sie
+  eingerückt unter ihrem Umsatz. **Wiederholt sich** (etwa ein Amazon-Spar-Abo) legt einen Posten in den Fixkosten an;
+  jede weitere Lieferung wird automatisch in die erste Abrechnung am oder nach ihrem Termin eingetragen.
 - **Analyse:** Kategorien und größte Empfänger lassen sich antippen und zeigen die zugehörigen Umsätze.
 - **Fixkosten:** getrennt nach monatlich, vierteljährlich, jährlich usw., jeweils mit Kategorie und Durchschnitt pro
   Monat; Summen pro Monat, Quartal und Jahr; sortierbar nach Fälligkeit, Kosten oder Kategorie. Ein **Anzeigename**

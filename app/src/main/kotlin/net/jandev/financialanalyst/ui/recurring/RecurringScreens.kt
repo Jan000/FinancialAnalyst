@@ -45,6 +45,7 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import kotlinx.coroutines.launch
 import net.jandev.financialanalyst.data.db.RecurringEntity
+import net.jandev.financialanalyst.data.db.GroupEntity
 import net.jandev.financialanalyst.data.db.TransactionEntity
 import net.jandev.financialanalyst.domain.Budget
 import net.jandev.financialanalyst.domain.RecurringPlan
@@ -82,7 +83,10 @@ private enum class RecurringSort(val label: String) {
 /** Abschnitte in dieser Reihenfolge; die häufigen Rhythmen zuerst. */
 private val sectionOrder = listOf(
     RecurrenceInterval.MONTHLY to "Monatliche",
+    RecurrenceInterval.BIMONTHLY to "Zweimonatliche",
     RecurrenceInterval.QUARTERLY to "Vierteljährliche",
+    RecurrenceInterval.FOUR_MONTHLY to "Viermonatliche",
+    RecurrenceInterval.FIVE_MONTHLY to "Fünfmonatliche",
     RecurrenceInterval.HALF_YEARLY to "Halbjährliche",
     RecurrenceInterval.YEARLY to "Jährliche",
     RecurrenceInterval.WEEKLY to "Wöchentliche",
@@ -93,7 +97,10 @@ private fun RecurrenceInterval.perLabel() = when (this) {
     RecurrenceInterval.WEEKLY -> "pro Woche"
     RecurrenceInterval.BIWEEKLY -> "alle 14 Tage"
     RecurrenceInterval.MONTHLY -> "pro Monat"
+    RecurrenceInterval.BIMONTHLY -> "alle 2 Monate"
     RecurrenceInterval.QUARTERLY -> "pro Quartal"
+    RecurrenceInterval.FOUR_MONTHLY -> "alle 4 Monate"
+    RecurrenceInterval.FIVE_MONTHLY -> "alle 5 Monate"
     RecurrenceInterval.HALF_YEARLY -> "pro Halbjahr"
     RecurrenceInterval.YEARLY -> "pro Jahr"
 }
@@ -171,7 +178,7 @@ fun RecurringScreen(onEdit: (Long) -> Unit) {
                 }
             }
             item(key = "month") {
-                ThisMonthCard(expenses, transactions, today, onEdit)
+                ThisMonthCard(expenses.filter { !it.isPosition }, transactions, today, onEdit)
             }
             item(key = "sort") {
                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -343,7 +350,12 @@ fun RecurringRow(item: RecurringEntity, today: LocalDate, categoryName: String? 
             Column(Modifier.weight(1f).padding(end = 12.dp)) {
                 Text(item.displayName, style = MaterialTheme.typography.bodyLarge, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 Text(
-                    listOfNotNull(categoryName, if (categoryName == null) item.interval.label else null, due).joinToString(" · "),
+                    listOfNotNull(
+                        categoryName,
+                        if (categoryName == null) item.interval.label else null,
+                        "in Sammelabrechnung".takeIf { item.isPosition },
+                        due,
+                    ).joinToString(" · "),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     maxLines = 1,
@@ -400,6 +412,8 @@ fun RecurringEditScreen(itemId: Long, onDone: () -> Unit, fromTransactionId: Lon
     var ready by rememberSaveable { mutableStateOf(itemId == 0L && fromTransactionId == 0L) }
     var name by rememberSaveable { mutableStateOf("") }
     var alias by rememberSaveable { mutableStateOf("") }
+    var groupId by rememberSaveable { mutableStateOf<Long?>(null) }
+    val groups by app.repository.groups.collectAsStateWithLifecycle(initialValue = emptyList())
     var isExpense by rememberSaveable { mutableStateOf(true) }
     var amount by rememberSaveable { mutableStateOf("") }
     var interval by rememberSaveable { mutableStateOf(RecurrenceInterval.MONTHLY) }
@@ -418,6 +432,7 @@ fun RecurringEditScreen(itemId: Long, onDone: () -> Unit, fromTransactionId: Lon
         if (!ready) {
             name = item.name
             alias = item.alias
+            groupId = item.groupId
             isExpense = item.amountCents <= 0
             amount = abs(item.amountCents).toFieldText()
             interval = item.interval
@@ -503,6 +518,26 @@ fun RecurringEditScreen(itemId: Long, onDone: () -> Unit, fromTransactionId: Lon
                 .padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
+            loaded?.takeIf { it.isPosition }?.let { item ->
+                val settlement = transactions.lastOrNull { RecurringDetector.matchKey(it.toTx()) == item.parentKey }
+                Text(
+                    "Wird automatisch als Position in die Abrechnung „${settlement?.counterparty ?: "Sammelabrechnung"}“ eingetragen, " +
+                        "sobald diese nach dem Termin gebucht ist. Auf dem Konto zählt nur die Abrechnung selbst.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                if (groups.isNotEmpty()) {
+                    val none = GroupEntity(id = 0, name = "Keine Gruppe")
+                    DropdownField(
+                        label = "Gruppe der Positionen",
+                        options = listOf(none) + groups,
+                        selected = groups.firstOrNull { it.id == groupId },
+                        onSelect = { groupId = it.id.takeIf { id -> id != 0L } },
+                        optionLabel = { it.name },
+                        placeholder = "Keine Gruppe",
+                    )
+                }
+            }
             if (loaded?.detected == true) {
                 Text(
                     "Automatisch aus deinen Umsätzen erkannt. Betrag und Termin werden mit jeder neuen Buchung fortgeschrieben.",
@@ -607,6 +642,7 @@ fun RecurringEditScreen(itemId: Long, onDone: () -> Unit, fromTransactionId: Lon
                         matchKey = key,
                         name = name.trim(),
                         alias = alias.trim(),
+                        groupId = groupId,
                         amountCents = signed,
                         // Eine von Hand bestätigte Betragsänderung ist keine „Preiserhöhung" mehr.
                         previousAmountCents = null,

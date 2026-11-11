@@ -28,7 +28,10 @@ enum class RecurrenceInterval(val label: String, val months: Int, val days: Int)
     WEEKLY("wöchentlich", 0, 7),
     BIWEEKLY("14-tägig", 0, 14),
     MONTHLY("monatlich", 1, 0),
+    BIMONTHLY("alle 2 Monate", 2, 0),
     QUARTERLY("vierteljährlich", 3, 0),
+    FOUR_MONTHLY("alle 4 Monate", 4, 0),
+    FIVE_MONTHLY("alle 5 Monate", 5, 0),
     HALF_YEARLY("halbjährlich", 6, 0),
     YEARLY("jährlich", 12, 0);
 

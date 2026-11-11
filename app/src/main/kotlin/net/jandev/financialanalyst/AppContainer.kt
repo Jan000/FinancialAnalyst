@@ -60,5 +60,6 @@ class AppContainer(context: Context) {
     suspend fun afterTransactionsChanged() {
         repository.enrich()
         repository.syncRecurring()
+        repository.applySplitTemplates()
     }
 }

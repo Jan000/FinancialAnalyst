@@ -22,7 +22,8 @@ object BudgetCalculator {
         val budgetAccounts = accounts.filter { it.account.includeInBudget }
         if (budgetAccounts.isEmpty()) return null
         val accountIds = budgetAccounts.map { it.account.id }.toSet()
-        val active = recurring.filter { it.active && !it.dismissed && (it.accountId == null || it.accountId in accountIds) }
+        // Positionen einer Sammelabrechnung belasten das Konto erst mit der Abrechnung selbst.
+        val active = recurring.filter { it.active && !it.dismissed && !it.isPosition && (it.accountId == null || it.accountId in accountIds) }
         val fixedKeys = active.map { it.matchKey }.toSet()
 
         // Heutige Buchungen, die keine Dauerposten sind: das ist das, was man heute „frei" ausgegeben hat.

@@ -50,6 +50,7 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import kotlinx.coroutines.launch
 import net.jandev.financialanalyst.data.db.GroupEntity
+import net.jandev.financialanalyst.data.editTargetId
 import net.jandev.financialanalyst.domain.Money
 import net.jandev.financialanalyst.ui.common.AmountText
 import net.jandev.financialanalyst.ui.common.ConfirmDialog
@@ -83,7 +84,7 @@ fun GroupsScreen(onBack: () -> Unit, onOpen: (Long) -> Unit) {
     val app = LocalApp.current
     val scope = rememberCoroutineScope()
     val groups by app.repository.groups.collectAsStateWithLifecycle(initialValue = null)
-    val transactions by app.repository.transactions.collectAsStateWithLifecycle(initialValue = emptyList())
+    val transactions by app.repository.analysisTransactions.collectAsStateWithLifecycle(initialValue = emptyList())
     var creating by rememberSaveable { mutableStateOf(false) }
 
     Screen(
@@ -194,7 +195,7 @@ fun GroupDetailScreen(groupId: Long, onBack: () -> Unit, onEditTransaction: (Lon
     val app = LocalApp.current
     val scope = rememberCoroutineScope()
     val groups by app.repository.groups.collectAsStateWithLifecycle(initialValue = null)
-    val transactions by app.repository.transactions.collectAsStateWithLifecycle(initialValue = emptyList())
+    val transactions by app.repository.analysisTransactions.collectAsStateWithLifecycle(initialValue = emptyList())
     val accounts by app.repository.accounts.collectAsStateWithLifecycle(initialValue = emptyList())
     var editing by rememberSaveable { mutableStateOf(false) }
     var confirmDelete by rememberSaveable { mutableStateOf(false) }
@@ -259,10 +260,10 @@ fun GroupDetailScreen(groupId: Long, onBack: () -> Unit, onEditTransaction: (Lon
                         TransactionRow(
                             tx = tx,
                             subtitle = listOfNotNull(tx.bookingDate.shortLabel(), accountNames[tx.accountId]).joinToString(" · "),
-                            onClick = { onEditTransaction(tx.id) },
+                            onClick = { onEditTransaction(tx.editTargetId) },
                         )
                     }
-                    IconButton(onClick = { scope.launch { app.repository.setGroup(listOf(tx.id), null) } }) {
+                    IconButton(onClick = { scope.launch { app.repository.removeFromGroup(tx) } }) {
                         Icon(Icons.Filled.Clear, contentDescription = "Aus der Gruppe nehmen")
                     }
                 }

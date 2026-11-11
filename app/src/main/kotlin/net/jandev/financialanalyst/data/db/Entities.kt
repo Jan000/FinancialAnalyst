@@ -90,6 +90,31 @@ data class TransactionEntity(
     val groupId: Long? = null,
 )
 
+/**
+ * Position innerhalb eines Umsatzes, etwa ein Einzelkauf in der Monatsabrechnung einer Kreditkarte.
+ * Positionen ändern keinen Kontostand; in Auswertung, Budgets und Gruppen treten sie an die Stelle ihres Umsatzes,
+ * der Rest bleibt beim Umsatz.
+ */
+@Entity(
+    tableName = "tx_splits",
+    foreignKeys = [
+        ForeignKey(entity = TransactionEntity::class, parentColumns = ["id"], childColumns = ["parentId"], onDelete = ForeignKey.CASCADE),
+    ],
+    indices = [Index("parentId")],
+)
+data class SplitEntity(
+    @PrimaryKey(autoGenerate = true) val id: Long = 0,
+    val parentId: Long,
+    val date: LocalDate,
+    /** Gleiches Vorzeichen wie der Umsatz. */
+    val amountCents: Long,
+    val description: String = "",
+    val categoryId: Long? = null,
+    val groupId: Long? = null,
+    /** Aus diesem wiederkehrenden Posten (Spar-Abo) automatisch angelegt. */
+    val recurringId: Long? = null,
+)
+
 /** Frei gewählte Zusammenfassung von Umsätzen, etwa alle Bestellungen und Erstattungen eines Projekts. */
 @Entity(tableName = "tx_groups")
 data class GroupEntity(
@@ -169,7 +194,17 @@ data class RecurringEntity(
     val note: String = "",
     /** Frei gewählter Anzeigename; dient nur der Anzeige und nie der Zuordnung von Zahlungen. */
     val alias: String = "",
+    /**
+     * Gesetzt: der Posten wird nicht direkt vom Konto bezahlt, sondern steckt als Position in einer Sammelabrechnung
+     * (etwa ein Amazon-Spar-Abo in der Kreditkartenabrechnung). Der Wert ist der Schlüssel dieser Abrechnungen.
+     */
+    val parentKey: String = "",
+    /** Gruppe, in die die automatisch angelegten Positionen kommen. */
+    val groupId: Long? = null,
 ) {
+    /** Steckt in einer Sammelabrechnung und belastet kein Konto direkt. */
+    val isPosition: Boolean get() = parentKey.isNotBlank()
+
     /** Was die Oberfläche zeigt: der Anzeigename, sonst die Bezeichnung. */
     val displayName: String get() = alias.ifBlank { name }
 }

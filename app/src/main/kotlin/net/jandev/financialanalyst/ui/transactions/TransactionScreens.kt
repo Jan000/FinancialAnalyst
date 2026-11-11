@@ -101,12 +101,15 @@ fun TransactionsScreen(onEdit: (Long) -> Unit, onAddAccount: () -> Unit, onOpenR
     val groupMarks = remember(groups, palette) { groups.associate { it.id to (it.name to palette[it.colorIndex.mod(palette.size)]) } }
 
     val recurring by app.repository.recurring.collectAsStateWithLifecycle(initialValue = emptyList())
+    val splits by app.repository.splits.collectAsStateWithLifecycle(initialValue = emptyList())
+    val splitsByParent = remember(splits) { splits.groupBy { it.parentId } }
     val today = remember { LocalDate.now() }
     // Was die Dauerposten in den nächsten Wochen erwarten lassen: als Umsätze mit negativer ID, die es noch nicht gibt.
     val planned = remember(recurring, today) {
         val origin = HashMap<Long, Long>()
         var nextId = -1L
-        val rows = recurring.filter { it.active && !it.dismissed }.flatMap { item ->
+        // Spar-Abos & Co. erscheinen nicht als eigene Buchung, sondern später als Position ihrer Abrechnung.
+        val rows = recurring.filter { it.active && !it.dismissed && !it.isPosition }.flatMap { item ->
             Budget.plannedFlows(listOf(RecurringPlan(item.displayName, item.amountCents, item.interval, item.nextDue)), today, today.plusDays(PLANNED_DAYS))
                 .map { flow ->
                     TransactionEntity(
@@ -145,7 +148,7 @@ fun TransactionsScreen(onEdit: (Long) -> Unit, onAddAccount: () -> Unit, onOpenR
             }
             return@Screen
         }
-        val filtered = remember(all, query, categoryNames, groupMarks) {
+        val filtered = remember(all, query, categoryNames, groupMarks, splitsByParent) {
             val q = query.trim().lowercase()
             if (q.isEmpty()) {
                 all
@@ -155,7 +158,13 @@ fun TransactionsScreen(onEdit: (Long) -> Unit, onAddAccount: () -> Unit, onOpenR
                         it.purpose.lowercase().contains(q) ||
                         groupMarks[it.groupId]?.first?.lowercase()?.contains(q) == true ||
                         categoryNames[it.categoryId]?.lowercase()?.contains(q) == true ||
-                        Money.format(abs(it.amountCents)).contains(q)
+                        Money.format(abs(it.amountCents)).contains(q) ||
+                        // Auch über seine Positionen ist ein Umsatz zu finden.
+                        splitsByParent[it.id].orEmpty().any { split ->
+                            split.description.lowercase().contains(q) ||
+                                groupMarks[split.groupId]?.first?.lowercase()?.contains(q) == true ||
+                                categoryNames[split.categoryId]?.lowercase()?.contains(q) == true
+                        }
                 }
             }
         }
@@ -259,6 +268,7 @@ fun TransactionsScreen(onEdit: (Long) -> Unit, onAddAccount: () -> Unit, onOpenR
                             val subtitle = when (kind) {
                                 PairKind.SINGLE -> listOfNotNull(
                                     "Geplant".takeIf { isPlanned },
+                                    splitsByParent[main.id]?.size?.let { if (it == 1) "1 Position" else "$it Positionen" },
                                     main.bookingDate.dayMonthLabel().takeIf { main.bookingDate != date },
                                     categoryNames[main.categoryId] ?: "Ohne Kategorie",
                                     accountNames[main.accountId],
@@ -285,6 +295,15 @@ fun TransactionsScreen(onEdit: (Long) -> Unit, onAddAccount: () -> Unit, onOpenR
                                 // Eine Umbuchung ändert das Vermögen nicht: Betrag ohne Vorzeichen und Farbe.
                                 neutralAmount = kind == PairKind.TRANSFER,
                             )
+                            splitsByParent[main.id]?.forEach { split ->
+                                SplitRow(
+                                    split = split,
+                                    categoryName = categoryNames[split.categoryId] ?: "Ohne Kategorie",
+                                    categoryColor = categoryColors[split.categoryId] ?: MaterialTheme.colorScheme.outlineVariant,
+                                    group = groupMarks[split.groupId],
+                                    onClick = { onEdit(main.id) },
+                                )
+                            }
                         }
                     }
                 }
@@ -428,6 +447,7 @@ fun TransactionEditScreen(
     var groupId by rememberSaveable { mutableStateOf<Long?>(null) }
     val groups by app.repository.groups.collectAsStateWithLifecycle(initialValue = emptyList())
     val allTransactions by app.repository.transactions.collectAsStateWithLifecycle(initialValue = emptyList())
+    val allSplits by app.repository.splits.collectAsStateWithLifecycle(initialValue = emptyList())
     var epochDay by rememberSaveable { mutableStateOf(LocalDate.now().toEpochDay()) }
     var counterparty by rememberSaveable { mutableStateOf("") }
     var purpose by rememberSaveable { mutableStateOf("") }
@@ -589,6 +609,15 @@ fun TransactionEditScreen(
                         onClick = { onOpenTransaction(peer.id) },
                     ) { AmountText(peer.amountCents) }
                 }
+            }
+            loaded?.let { self ->
+                // Positionen beziehen sich auf den gespeicherten Betrag; erst speichern, dann aufteilen.
+                SplitSection(
+                    parent = self,
+                    splits = allSplits.filter { it.parentId == self.id },
+                    categories = categories,
+                    groups = groups,
+                )
             }
             if (loaded != null && loaded?.transferPeerId == null) {
                 OutlinedButton(onClick = { onCreateRecurring(transactionId) }, modifier = Modifier.fillMaxWidth()) {

@@ -99,6 +99,33 @@ interface TransactionDao {
 }
 
 @Dao
+interface SplitDao {
+    @Query("SELECT * FROM tx_splits ORDER BY date, id")
+    fun observeAll(): Flow<List<SplitEntity>>
+
+    @Query("SELECT * FROM tx_splits")
+    suspend fun all(): List<SplitEntity>
+
+    @Insert
+    suspend fun insertAll(splits: List<SplitEntity>)
+
+    @Upsert
+    suspend fun upsert(split: SplitEntity): Long
+
+    @Delete
+    suspend fun delete(split: SplitEntity)
+
+    @Query("UPDATE tx_splits SET categoryId = NULL WHERE categoryId = :categoryId")
+    suspend fun clearCategory(categoryId: Long)
+
+    @Query("UPDATE tx_splits SET groupId = :groupId WHERE id = :id")
+    suspend fun setGroup(id: Long, groupId: Long?)
+
+    @Query("UPDATE tx_splits SET groupId = NULL WHERE groupId = :groupId")
+    suspend fun clearGroup(groupId: Long)
+}
+
+@Dao
 interface GroupDao {
     @Query("SELECT * FROM tx_groups ORDER BY name COLLATE NOCASE")
     fun observeAll(): Flow<List<GroupEntity>>

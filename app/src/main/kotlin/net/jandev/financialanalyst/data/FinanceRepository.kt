@@ -11,6 +11,7 @@ import net.jandev.financialanalyst.data.db.AutoRuleEntity
 import net.jandev.financialanalyst.data.db.BankSessionEntity
 import net.jandev.financialanalyst.data.db.BudgetEntity
 import net.jandev.financialanalyst.data.db.SavingsGoalEntity
+import net.jandev.financialanalyst.data.db.SplitEntity
 import net.jandev.financialanalyst.data.db.CategoryEntity
 import net.jandev.financialanalyst.data.db.CategoryRuleEntity
 import net.jandev.financialanalyst.data.db.GroupEntity
@@ -91,6 +92,7 @@ class FinanceRepository(
     suspend fun deleteCategory(category: CategoryEntity) = db.withTransaction {
         db.transactions().clearCategory(category.id)
         db.recurring().clearCategory(category.id)
+        db.splits().clearCategory(category.id)
         db.planning().deleteBudget(category.id)
         db.rules().deleteOfCategory(category.id)
         db.categories().deleteRulesOf(category.id)
@@ -264,6 +266,20 @@ class FinanceRepository(
             if (items.isNotEmpty()) db.recurring().updateAll(items.map { it.copy(categoryId = categoryId) })
         }
 
+    val splits: Flow<List<SplitEntity>> = db.splits().observeAll()
+
+    /** Umsätze für Auswertung, Budgets und Gruppen: aufgeteilte Umsätze durch ihre Positionen ersetzt. */
+    val analysisTransactions: Flow<List<TransactionEntity>> = combine(transactions, splits) { t, s -> expandSplits(t, s) }
+
+    suspend fun saveSplit(split: SplitEntity) = db.splits().upsert(split)
+
+    suspend fun deleteSplit(split: SplitEntity) = db.splits().delete(split)
+
+    /** Nimmt einen Umsatz oder eine Position (aus [analysisTransactions]) aus seiner Gruppe. */
+    suspend fun removeFromGroup(tx: TransactionEntity) {
+        if (tx.isSplitPart) db.splits().setGroup(-1_000_000_000L - tx.id, null) else setGroup(listOf(tx.id), null)
+    }
+
     val groups: Flow<List<GroupEntity>> = db.groups().observeAll()
 
     /** Liefert die ID der gespeicherten Gruppe. */
@@ -274,6 +290,7 @@ class FinanceRepository(
 
     suspend fun deleteGroup(group: GroupEntity) = db.withTransaction {
         db.transactions().clearGroup(group.id)
+        db.splits().clearGroup(group.id)
         db.groups().delete(group)
     }
 
@@ -328,7 +345,12 @@ class FinanceRepository(
     suspend fun saveRecurring(item: RecurringEntity): Long = db.withTransaction {
         // Von Hand angelegte Posten bekommen den Schlüssel aus ihrem Namen, damit passende Umsätze sie fortschreiben;
         // aus Buchungen angelegte bringen den Schlüssel dieser Buchungen schon mit.
-        val withKey = if (item.detected || item.matchKey.isNotBlank()) item else item.copy(matchKey = RecurringDetector.matchKey(item.name, item.amountCents))
+        val withKey = when {
+            // Positionen einer Sammelabrechnung haben keine eigenen Buchungen: ein Schlüssel, den kein Umsatz trägt.
+            item.isPosition -> item.copy(matchKey = "pos:${item.parentKey}:${Categorizer.merchantKey(item.name)}")
+            item.detected || item.matchKey.isNotBlank() -> item
+            else -> item.copy(matchKey = RecurringDetector.matchKey(item.name, item.amountCents))
+        }
         // Gibt es für diese Zahlung schon einen Posten (etwa einen erkannten), wird er übernommen statt verdoppelt.
         val twin = if (withKey.id == 0L) db.recurring().all().firstOrNull { it.matchKey == withKey.matchKey } else null
         val keyed = if (twin != null) withKey.copy(id = twin.id, detected = false, dismissed = false) else withKey
@@ -336,7 +358,9 @@ class FinanceRepository(
         val id = if (keyed.id == 0L) inserted else keyed.id
         val category = keyed.categoryId
         val key = keyed.matchKey.substringBeforeLast('|')
-        if (category != null && key.isNotBlank()) {
+        if (keyed.isPosition) {
+            applySplitTemplates()
+        } else if (category != null && key.isNotBlank()) {
             val conditions = RuleMatcher.fromLearnKey(key, sign = if (keyed.matchKey.endsWith("|-")) -1 else 1)
             saveRule(AutoRuleEntity(name = keyed.name, categoryId = category), conditions)
             val affected = db.transactions().all().filter { !it.categoryLocked }.matching(conditions, category)
@@ -351,6 +375,42 @@ class FinanceRepository(
             db.recurring().upsert(item.copy(dismissed = true, active = false))
         } else {
             db.recurring().delete(item)
+        }
+    }
+
+    /**
+     * Trägt fällige Lieferungen wiederkehrender Positionen (Spar-Abos) in die Sammelabrechnung ein, mit der sie bezahlt
+     * wurden: die erste Abrechnung am oder nach dem Liefertermin. Jede Lieferung nur einmal; was noch keine Abrechnung
+     * hat, wartet als nächster Termin.
+     */
+    suspend fun applySplitTemplates() = db.withTransaction {
+        val templates = db.recurring().all().filter { it.isPosition && it.active && !it.dismissed }
+        if (templates.isEmpty()) return@withTransaction
+        val transactions = db.transactions().all()
+        val existing = db.splits().all()
+        for (template in templates) {
+            val settlements = transactions.filter { RecurringDetector.matchKey(it.toTx()) == template.parentKey }.sortedBy { it.bookingDate }
+            var due = template.nextDue
+            val created = ArrayList<SplitEntity>()
+            while (created.size < 120) {
+                val settlement = settlements.firstOrNull { it.bookingDate >= due } ?: break
+                if (existing.none { it.recurringId == template.id && it.date == due }) {
+                    created.add(
+                        SplitEntity(
+                            parentId = settlement.id,
+                            date = due,
+                            amountCents = template.amountCents,
+                            description = template.displayName,
+                            categoryId = template.categoryId,
+                            groupId = template.groupId,
+                            recurringId = template.id,
+                        ),
+                    )
+                }
+                due = template.interval.next(due)
+            }
+            if (created.isNotEmpty()) db.splits().insertAll(created)
+            if (due != template.nextDue) db.recurring().upsert(template.copy(nextDue = due))
         }
     }
 
@@ -518,6 +578,41 @@ fun TransactionEntity.toTx(): Tx = Tx(
     categoryId = categoryId,
     isTransfer = transferPeerId != null,
 )
+
+private const val SPLIT_PREFIX = "split:"
+
+/**
+ * Ersetzt jeden aufgeteilten Umsatz durch seine Positionen und den nicht aufgeteilten Rest. Positionen erscheinen als
+ * Umsätze mit negativer ID; [editTargetId] führt von ihnen zum eigentlichen Umsatz. Die Summe je Konto bleibt gleich.
+ */
+fun expandSplits(transactions: List<TransactionEntity>, splits: List<SplitEntity>): List<TransactionEntity> {
+    if (splits.isEmpty()) return transactions
+    val byParent = splits.groupBy { it.parentId }
+    return transactions.flatMap { tx ->
+        val parts = byParent[tx.id] ?: return@flatMap listOf(tx)
+        val rest = tx.amountCents - parts.sumOf { it.amountCents }
+        parts.map { part ->
+            TransactionEntity(
+                id = -1_000_000_000L - part.id,
+                accountId = tx.accountId,
+                bookingDate = part.date,
+                amountCents = part.amountCents,
+                counterparty = part.description.ifBlank { tx.counterparty },
+                purpose = "Position von ${tx.counterparty.ifBlank { tx.purpose }}",
+                categoryId = part.categoryId,
+                categoryLocked = true,
+                externalId = SPLIT_PREFIX + tx.id,
+                groupId = part.groupId,
+            )
+        } + listOfNotNull(tx.copy(amountCents = rest).takeIf { rest != 0L })
+    }
+}
+
+/** Der Umsatz, den man zum Bearbeiten öffnet: bei einer Position der aufgeteilte Umsatz. */
+val TransactionEntity.editTargetId: Long
+    get() = if (id < 0 && externalId?.startsWith(SPLIT_PREFIX) == true) externalId.removePrefix(SPLIT_PREFIX).toLong() else id
+
+val TransactionEntity.isSplitPart: Boolean get() = id < 0 && externalId?.startsWith(SPLIT_PREFIX) == true
 
 data class RuleWithConditions(val rule: AutoRuleEntity, val conditions: List<RuleCondition>)
 
