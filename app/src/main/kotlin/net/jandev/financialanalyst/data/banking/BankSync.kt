@@ -158,6 +158,10 @@ class BankSync(
             db.bankSessions().delete(row)
         }
         distinguishNames(renameAll = false)
+        if (session.accounts.none { it.uid != null }) {
+            // Freigabe erteilt, aber nichts Abrufbares dahinter: das klar sagen statt still „verbunden" zu melden.
+            return SyncReport(0, 0, listOf("${pending.bankName}: $NO_ACCOUNTS_HINT"), needsReconnect = false)
+        }
         return syncAll()
     }
 
@@ -193,16 +197,20 @@ class BankSync(
         db.bankSessions().delete(session)
     }
 
-    /** Holt für alle verbundenen Konten Umsätze und Salden. Läuft nie doppelt gleichzeitig. */
-    suspend fun syncAll(): SyncReport = mutex.withLock {
+    /**
+     * Holt Umsätze und Salden der verbundenen Konten; mit [only] nur für die genannten Konten.
+     * Läuft nie doppelt gleichzeitig.
+     */
+    suspend fun syncAll(only: Set<Long>? = null): SyncReport = mutex.withLock {
         if (!credentials.onceDone(ONCE_ACCOUNT_NAMES)) {
             distinguishNames(renameAll = true)
             credentials.markDone(ONCE_ACCOUNT_NAMES)
         }
         val now = Instant.now().epochSecond
         val sessions = db.bankSessions().all().associateBy { it.id }
-        val accounts = db.accounts().all().filter { it.connector == ConnectorType.ENABLE_BANKING && it.externalId != null }
-        if (!credentials.onceDone(ONCE_HOLDER_NAMES)) {
+        val connected = db.accounts().all().filter { it.connector == ConnectorType.ENABLE_BANKING && it.externalId != null }
+        val accounts = if (only == null) connected else connected.filter { it.id in only }
+        if (only == null && !credentials.onceDone(ONCE_HOLDER_NAMES)) {
             // Für Verbindungen aus früheren Versionen die Inhabernamen nachholen (an ihnen hängen Umbuchungen).
             val names = accounts.groupBy { it.sessionId }.values.mapNotNull { group ->
                 runCatching { api.accountDetails(group.last().externalId!!).name }.getOrNull()
@@ -292,6 +300,15 @@ class BankSync(
         return summary.inserted
     }
 
+    /** Nur für die Diagnose: welche Felder und wie viele Konten die Sitzungen bei Enable Banking tragen. */
+    suspend fun describeSessions(): List<String> = db.bankSessions().all().map { row ->
+        val fields = java.util.TreeMap<String, Int>()
+        val status = runCatching {
+            api.session(row.sessionId) { text -> runCatching { countFields(Json.parseToJsonElement(text), "", fields) } }.status
+        }.getOrElse { "Fehler: ${it.message}" }
+        "${row.bankName}: Status $status, Felder $fields"
+    }
+
     /** Zählt je Feldpfad, wie oft er einen nicht leeren Wert trägt. Inhalte werden nicht festgehalten. */
     private fun countFields(element: JsonElement, path: String, into: MutableMap<String, Int>) {
         when (element) {
@@ -313,6 +330,10 @@ class BankSync(
 
     companion object {
         private const val WORK_NAME = "bank-sync"
+
+        /** Hinweis für Freigaben, hinter denen die Bank kein Konto herausgibt. */
+        const val NO_ACCOUNTS_HINT = "Die Bank hat für diese Freigabe kein abrufbares Konto geliefert. Über die Bankschnittstelle " +
+            "kommen nur Zahlungskonten (Girokonto, Kreditkarte, Tagesgeld) – Kredite und Depots nicht."
         private const val ONCE_ACCOUNT_NAMES = "account_names_v2"
         private const val ONCE_HOLDER_NAMES = "holder_names_v1"
 

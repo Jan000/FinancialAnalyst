@@ -68,7 +68,8 @@ object Periods {
 
 data class CategoryTotal(val categoryId: Long?, val cents: Long, val count: Int)
 
-data class MerchantTotal(val name: String, val cents: Long, val count: Int)
+/** [key] ist der Händlerschlüssel, unter dem die Umsätze zusammengefasst sind ([Analytics.merchantKey]). */
+data class MerchantTotal(val name: String, val cents: Long, val count: Int, val key: String = "")
 
 data class PeriodSummary(
     val range: DateRange,
@@ -97,6 +98,13 @@ object Analytics {
      * Wertet einen Zeitraum aus. Umbuchungen zwischen eigenen Konten bleiben außen vor.
      * [kindOf] liefert die Art einer Kategorie; ohne Kategorie entscheidet das Vorzeichen.
      */
+    /** Schlüssel, unter dem die Auswertung Ausgaben an denselben Empfänger zusammenfasst. */
+    fun merchantKey(counterparty: String): String = Categorizer.merchantKey(counterparty).ifBlank { "ohne bezeichnung" }
+
+    /** Zählt der Umsatz in der Auswertung als Ausgabe an einen Empfänger? Dieselbe Regel wie in [summarize]. */
+    fun isMerchantExpense(tx: Tx, kind: CategoryKind?): Boolean =
+        !tx.isTransfer && kind != CategoryKind.TRANSFER && kind != CategoryKind.INCOME && tx.amountCents < 0
+
     fun summarize(transactions: List<Tx>, range: DateRange, kindOf: (Long?) -> CategoryKind?): PeriodSummary {
         val expenses = HashMap<Long?, LongArray>()
         val incomes = HashMap<Long?, LongArray>()
@@ -117,8 +125,7 @@ object Analytics {
             bucket[0] += if (isExpense) -tx.amountCents else tx.amountCents
             bucket[1]++
             if (isExpense && tx.amountCents < 0) {
-                val key = Categorizer.merchantKey(tx.counterparty).ifBlank { "ohne bezeichnung" }
-                val entry = merchants.getOrPut(key) { tx.counterparty.ifBlank { "Ohne Bezeichnung" } to LongArray(2) }
+                val entry = merchants.getOrPut(merchantKey(tx.counterparty)) { tx.counterparty.ifBlank { "Ohne Bezeichnung" } to LongArray(2) }
                 entry.second[0] += -tx.amountCents
                 entry.second[1]++
             }
@@ -136,8 +143,8 @@ object Analytics {
             expenseCents = expenseTotals.sumOf { it.cents },
             expensesByCategory = expenseTotals,
             incomeByCategory = incomeTotals,
-            topMerchants = merchants.values
-                .map { MerchantTotal(it.first, it.second[0], it.second[1].toInt()) }
+            topMerchants = merchants
+                .map { (key, value) -> MerchantTotal(value.first, value.second[0], value.second[1].toInt(), key) }
                 .sortedByDescending { it.cents },
             transactionCount = count,
         )

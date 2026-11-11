@@ -57,6 +57,12 @@ App ist für den Eigengebrauch mit dem eigenen Schlüssel gedacht und darf so ni
 
 Die Bankfreigabe gilt meist 180 Tage und muss dann erneuert werden; die App weist rechtzeitig darauf hin. Im
 Hintergrund wird dreimal täglich abgerufen, weil Banken ohne Nutzerbestätigung meist nur vier Abrufe pro Tag zulassen.
+Einzelne Konten lassen sich gezielt abrufen (Bankverbindungen → „Abrufen" am Konto oder im Konto selbst), ohne die
+Abruflimits der übrigen Banken anzutasten.
+
+Über die Schnittstelle kommen nur Zahlungskonten (Giro, Kreditkarte, Tagesgeld). Kredite und Depots gibt keine Bank so
+heraus; liefert eine Freigabe gar kein Konto (so bei der DKB mit nur einem Kredit), sagt die App das. Kredite trägt man
+unter **Kredite** ein; ihre errechnete Restschuld steht dann auch in der Kontenliste.
 
 ### Google-Drive-Sicherung einrichten
 
@@ -81,7 +87,13 @@ Ohne Google-Einrichtung funktioniert die Sicherung als Datei (**Datei speichern 
   alle zutreffen müssen. Neue Umsätze werden automatisch zugeordnet; „Speichern und Umsätze zuordnen" wendet eine
   Regel nach Vorschau auf vorhandene Umsätze an. Eigene Regeln gehen den mitgelieferten Schlagwörtern vor.
 - **Gruppen** (Mehr → Gruppen): Umsätze eines Vorhabens zusammenfassen und den Saldo sehen.
-- Die Umsatzliste zeigt die erwarteten Buchungen der Dauerposten für die nächsten 31 Tage ausgegraut.
+- Die Umsatzliste zeigt die erwarteten Buchungen der Dauerposten für die nächsten 31 Tage ausgegraut. Die beiden
+  Seiten einer Umbuchung (auch Bankabbuchung und PayPal-Kauf) stehen als zusammenhängender Block.
+- **Analyse:** Kategorien und größte Empfänger lassen sich antippen und zeigen die zugehörigen Umsätze.
+- **Fixkosten:** getrennt nach monatlich, vierteljährlich, jährlich usw., jeweils mit Kategorie und Durchschnitt pro
+  Monat; Summen pro Monat, Quartal und Jahr; sortierbar nach Fälligkeit, Kosten oder Kategorie. Ein **Anzeigename**
+  dient nur der Anzeige und ändert nichts an der Zuordnung der Zahlungen. Ein erkannter Posten gilt als pausiert, wenn
+  die erwartete Buchung mehr als sechs Wochen ausbleibt; er wird von selbst wieder aktiv, sobald eine kommt.
 
 ## Stand der Erprobung
 

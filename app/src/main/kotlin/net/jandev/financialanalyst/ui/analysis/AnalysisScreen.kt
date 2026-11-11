@@ -6,6 +6,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
@@ -60,7 +61,10 @@ private fun historyLength(period: Period) = when (period) {
 }
 
 @Composable
-fun AnalysisScreen(onOpenCategory: (categoryId: Long, from: LocalDate, to: LocalDate, expense: Boolean) -> Unit) {
+fun AnalysisScreen(
+    onOpenCategory: (categoryId: Long, from: LocalDate, to: LocalDate, expense: Boolean) -> Unit,
+    onOpenMerchant: (key: String, from: LocalDate, to: LocalDate) -> Unit = { _, _, _ -> },
+) {
     val app = LocalApp.current
     val transactions by app.repository.transactions.collectAsStateWithLifecycle(initialValue = null)
     val categories by app.repository.categories.collectAsStateWithLifecycle(initialValue = emptyList())
@@ -204,8 +208,10 @@ fun AnalysisScreen(onOpenCategory: (categoryId: Long, from: LocalDate, to: Local
                     summary.topMerchants.take(8).forEach { merchant ->
                         LabeledRow(
                             label = if (merchant.count > 1) "${merchant.name} (${merchant.count}×)" else merchant.name,
+                            onClick = { onOpenMerchant(merchant.key, summary.range.start, summary.range.endInclusive) },
                         ) {
                             AmountText(merchant.cents, withSign = false, colored = false)
+                            OpenHint()
                         }
                     }
                 }
@@ -220,6 +226,17 @@ fun AnalysisScreen(onOpenCategory: (categoryId: Long, from: LocalDate, to: Local
             }
         }
     }
+}
+
+/** Kleiner Pfeil am Zeilenende: die Zeile führt zu den einzelnen Umsätzen. */
+@Composable
+private fun OpenHint() {
+    Icon(
+        Icons.AutoMirrored.Filled.KeyboardArrowRight,
+        contentDescription = null,
+        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+        modifier = Modifier.padding(start = 4.dp).size(18.dp),
+    )
 }
 
 @Composable
@@ -261,6 +278,7 @@ private fun CategoryList(
                     )
                 }
                 AmountText(total.cents, withSign = false, colored = false, style = MaterialTheme.typography.bodyMedium)
+                OpenHint()
             }
             ShareBar(total.cents.toFloat() / max, color)
         }

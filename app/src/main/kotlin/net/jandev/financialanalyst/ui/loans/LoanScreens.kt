@@ -97,6 +97,18 @@ private fun LoanEntity.terms(
     actualUntil = today,
 )
 
+/** Restschuld je Kredit zum Stichtag, für Übersichten außerhalb des Kreditbereichs. */
+internal fun remainingDebts(
+    loans: List<LoanEntity>,
+    extras: List<LoanExtraPaymentEntity>,
+    changes: List<LoanRateChangeEntity>,
+    transactions: List<TransactionEntity>,
+    today: LocalDate,
+): List<Pair<LoanEntity, Long>> = loans.map { loan ->
+    val terms = loan.terms(extras, changes, transactions, today)
+    loan to LoanCalculator.status(terms, LoanCalculator.schedule(terms), today).remainingCents
+}
+
 private data class Payee(val key: String, val name: String, val count: Int)
 
 private fun durationLabel(months: Int): String {

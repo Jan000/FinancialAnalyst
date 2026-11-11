@@ -156,6 +156,28 @@ fun AppRoot() {
                     onOpenCategory = { id, from, to, expense ->
                         nav.navigate("category/$id/${from.toEpochDay()}/${to.toEpochDay()}/$expense")
                     },
+                    onOpenMerchant = { key, from, to ->
+                        nav.navigate("merchant/${from.toEpochDay()}/${to.toEpochDay()}?key=${android.net.Uri.encode(key)}")
+                    },
+                )
+            }
+            composable(
+                "merchant/{from}/{to}?key={key}",
+                arguments = listOf(
+                    navArgument("from") { type = NavType.LongType },
+                    navArgument("to") { type = NavType.LongType },
+                    navArgument("key") { type = NavType.StringType; defaultValue = "" },
+                ),
+            ) { entry ->
+                val args = entry.arguments
+                CategoryTransactionsScreen(
+                    categoryId = 0,
+                    from = java.time.LocalDate.ofEpochDay(args?.getLong("from") ?: 0),
+                    to = java.time.LocalDate.ofEpochDay(args?.getLong("to") ?: 0),
+                    expense = true,
+                    onBack = { nav.popBackStack() },
+                    onEdit = { nav.navigate(Routes.transactionEdit(it)) },
+                    merchantKey = args?.getString("key").orEmpty(),
                 )
             }
             composable(
@@ -186,7 +208,7 @@ fun AppRoot() {
                     onDone = { nav.popBackStack() },
                 )
             }
-            composable(Routes.BANKS) { BankScreen(onBack = { nav.popBackStack() }) }
+            composable(Routes.BANKS) { BankScreen(onBack = { nav.popBackStack() }, onOpenLoans = { nav.navigate(Routes.LOANS) }) }
             composable(Routes.NOTIFICATIONS) { NotificationScreen(onBack = { nav.popBackStack() }) }
             composable(Routes.BACKUP) { BackupScreen(onBack = { nav.popBackStack() }) }
             composable(Routes.GROUPS) {
@@ -249,7 +271,11 @@ fun AppRoot() {
                 )
             }
             composable(Routes.ACCOUNTS) {
-                AccountsScreen(onBack = { nav.popBackStack() }, onEdit = { nav.navigate(Routes.accountEdit(it)) })
+                AccountsScreen(
+                    onBack = { nav.popBackStack() },
+                    onEdit = { nav.navigate(Routes.accountEdit(it)) },
+                    onOpenLoan = { nav.navigate(Routes.loan(it)) },
+                )
             }
             composable("account/{id}", arguments = listOf(navArgument("id") { type = NavType.LongType })) { entry ->
                 AccountEditScreen(

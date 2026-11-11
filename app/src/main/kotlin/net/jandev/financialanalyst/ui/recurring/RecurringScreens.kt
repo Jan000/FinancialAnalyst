@@ -18,6 +18,7 @@ import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material3.Button
 import androidx.compose.material3.ExtendedFloatingActionButton
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -50,6 +51,7 @@ import net.jandev.financialanalyst.ui.common.ConfirmDialog
 import net.jandev.financialanalyst.ui.common.DateField
 import net.jandev.financialanalyst.ui.common.DropdownField
 import net.jandev.financialanalyst.ui.common.EmptyState
+import net.jandev.financialanalyst.ui.common.LabeledRow
 import net.jandev.financialanalyst.ui.common.LocalApp
 import net.jandev.financialanalyst.ui.common.MoneyField
 import net.jandev.financialanalyst.ui.common.Screen
@@ -61,11 +63,43 @@ import net.jandev.financialanalyst.ui.theme.LocalFinanceColors
 import java.time.LocalDate
 import kotlin.math.abs
 
+/** Reihenfolge der Posten innerhalb eines Abschnitts. */
+private enum class RecurringSort(val label: String) {
+    DUE("Fälligkeit"),
+    AMOUNT("Kosten"),
+    CATEGORY("Kategorie"),
+}
+
+/** Abschnitte in dieser Reihenfolge; die häufigen Rhythmen zuerst. */
+private val sectionOrder = listOf(
+    RecurrenceInterval.MONTHLY to "Monatliche",
+    RecurrenceInterval.QUARTERLY to "Vierteljährliche",
+    RecurrenceInterval.HALF_YEARLY to "Halbjährliche",
+    RecurrenceInterval.YEARLY to "Jährliche",
+    RecurrenceInterval.WEEKLY to "Wöchentliche",
+    RecurrenceInterval.BIWEEKLY to "14-tägige",
+)
+
+private fun RecurrenceInterval.perLabel() = when (this) {
+    RecurrenceInterval.WEEKLY -> "pro Woche"
+    RecurrenceInterval.BIWEEKLY -> "alle 14 Tage"
+    RecurrenceInterval.MONTHLY -> "pro Monat"
+    RecurrenceInterval.QUARTERLY -> "pro Quartal"
+    RecurrenceInterval.HALF_YEARLY -> "pro Halbjahr"
+    RecurrenceInterval.YEARLY -> "pro Jahr"
+}
+
+/** Durchschnitt pro Monat, aus dem Jahresbetrag gerechnet, damit beim Aufsummieren keine Cent verloren gehen. */
+private fun RecurringEntity.yearlyCents() = interval.yearlyCents(abs(amountCents))
+
 @Composable
 fun RecurringScreen(onEdit: (Long) -> Unit) {
     val app = LocalApp.current
     val items by app.repository.recurring.collectAsStateWithLifecycle(initialValue = null)
+    val categories by app.repository.categories.collectAsStateWithLifecycle(initialValue = emptyList())
+    var sort by rememberSaveable { mutableStateOf(RecurringSort.DUE) }
     val today = LocalDate.now()
+    val categoryNames = remember(categories) { categories.associate { it.id to it.name } }
 
     Screen(
         title = "Fixkosten & Abos",
@@ -87,64 +121,129 @@ fun RecurringScreen(onEdit: (Long) -> Unit) {
             )
             return@Screen
         }
+        fun ordered(list: List<RecurringEntity>) = when (sort) {
+            RecurringSort.DUE -> list.sortedBy { it.nextDue }
+            RecurringSort.AMOUNT -> list.sortedByDescending { it.yearlyCents() }
+            RecurringSort.CATEGORY -> list.sortedWith(
+                compareBy<RecurringEntity>({ categoryNames[it.categoryId] == null }, { categoryNames[it.categoryId]?.lowercase().orEmpty() })
+                    .thenByDescending { it.yearlyCents() },
+            )
+        }
         val active = visible.filter { it.active }
-        val expenses = active.filter { it.amountCents < 0 }.sortedBy { it.nextDue }
-        val incomes = active.filter { it.amountCents > 0 }.sortedBy { it.nextDue }
-        val paused = visible.filter { !it.active }
-        val monthlyOut = expenses.sumOf { it.interval.monthlyCents(-it.amountCents) }
-        val monthlyIn = incomes.sumOf { it.interval.monthlyCents(it.amountCents) }
+        val expenses = active.filter { it.amountCents < 0 }
+        val incomes = active.filter { it.amountCents > 0 }
+        val paused = ordered(visible.filter { !it.active })
+        val yearlyOut = expenses.sumOf { it.yearlyCents() }
+        val yearlyIn = incomes.sumOf { it.yearlyCents() }
 
         LazyColumn(
             modifier = Modifier.fillMaxSize().padding(padding),
             contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 8.dp, bottom = 96.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
-            item {
-                SectionCard {
-                    Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
-                        Column(Modifier.weight(1f)) {
-                            Text("Fixkosten pro Monat", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                            AmountText(monthlyOut, style = MaterialTheme.typography.headlineSmall, withSign = false, colored = false)
-                        }
-                        Column(Modifier.weight(1f)) {
-                            Text("Feste Einnahmen pro Monat", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                            AmountText(monthlyIn, style = MaterialTheme.typography.headlineSmall, withSign = false, colored = false)
-                        }
+            item(key = "sum") {
+                SectionCard(title = "Fixkosten gesamt") {
+                    Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                        TotalFigure("pro Monat", yearlyOut / 12, Modifier.weight(1f))
+                        TotalFigure("pro Quartal", yearlyOut / 4, Modifier.weight(1f))
+                        TotalFigure("pro Jahr", yearlyOut, Modifier.weight(1f))
+                    }
+                    if (incomes.isNotEmpty()) {
+                        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+                        LabeledRow("Feste Einnahmen pro Monat") { AmountText(yearlyIn / 12, withSign = false, colored = false) }
+                        LabeledRow("Bleibt nach Fixkosten pro Monat") { AmountText((yearlyIn - yearlyOut) / 12, negativeIsAlarming = true) }
                     }
                     Text(
-                        "Pro Jahr gehen ${Money.format(monthlyOut * 12)} fest ab. Seltenere Zahlungen sind auf den Monat umgerechnet.",
+                        "Seltenere Zahlungen sind als Durchschnitt auf Monat, Quartal und Jahr umgerechnet.",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 }
             }
-            if (expenses.isNotEmpty()) {
-                item { RecurringGroup("Ausgaben", expenses, today, onEdit) }
+            item(key = "sort") {
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text("Sortieren", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    RecurringSort.entries.forEach { option ->
+                        FilterChip(selected = sort == option, onClick = { sort = option }, label = { Text(option.label) })
+                    }
+                }
             }
-            if (incomes.isNotEmpty()) {
-                item { RecurringGroup("Einnahmen", incomes, today, onEdit) }
+            for ((kind, list) in listOf("Ausgaben" to expenses, "Einnahmen" to incomes)) {
+                for ((interval, adjective) in sectionOrder) {
+                    val section = ordered(list.filter { it.interval == interval })
+                    if (section.isEmpty()) continue
+                    item(key = "$kind-$interval") {
+                        RecurringGroup(
+                            title = "$adjective $kind",
+                            sums = listOfNotNull(
+                                "${Money.format(section.sumOf { abs(it.amountCents) })} ${interval.perLabel()}"
+                                    .takeIf { interval != RecurrenceInterval.MONTHLY },
+                                "${Money.format(section.sumOf { it.yearlyCents() } / 12)} pro Monat",
+                            ).joinToString(" · "),
+                            items = section,
+                            today = today,
+                            categoryNames = categoryNames,
+                            onEdit = onEdit,
+                        )
+                    }
+                }
             }
             if (paused.isNotEmpty()) {
-                item { RecurringGroup("Pausiert oder beendet", paused, today, onEdit) }
+                item(key = "paused") {
+                    RecurringGroup(
+                        title = "Pausiert oder beendet",
+                        sums = null,
+                        items = paused,
+                        today = today,
+                        categoryNames = categoryNames,
+                        onEdit = onEdit,
+                        hint = "Hier landet ein automatisch erkannter Posten, wenn seine erwartete Buchung mehr als sechs Wochen ausbleibt. " +
+                            "Kommt wieder eine, wird er von selbst aktiv. Stimmt die Einschätzung nicht, schalte ihn im Posten wieder auf „Aktiv“.",
+                    )
+                }
             }
         }
     }
 }
 
 @Composable
-private fun RecurringGroup(title: String, items: List<RecurringEntity>, today: LocalDate, onEdit: (Long) -> Unit) {
-    SectionCard(title = title) {
+private fun TotalFigure(label: String, cents: Long, modifier: Modifier = Modifier) {
+    Column(modifier) {
+        Text(label, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        AmountText(cents, style = MaterialTheme.typography.titleMedium, withSign = false, colored = false)
+    }
+}
+
+@Composable
+private fun RecurringGroup(
+    title: String,
+    sums: String?,
+    items: List<RecurringEntity>,
+    today: LocalDate,
+    categoryNames: Map<Long, String>,
+    onEdit: (Long) -> Unit,
+    hint: String? = null,
+) {
+    SectionCard {
+        Column {
+            Text(title, style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            if (sums != null) Text(sums, style = MaterialTheme.typography.titleMedium)
+        }
+        if (hint != null) {
+            Text(hint, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
         items.forEachIndexed { index, item ->
             if (index > 0) HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
-            RecurringRow(item, today, onClick = { onEdit(item.id) })
+            RecurringRow(item, today, categoryName = categoryNames[item.categoryId] ?: "Ohne Kategorie", onClick = { onEdit(item.id) })
         }
     }
 }
 
 @Composable
-fun RecurringRow(item: RecurringEntity, today: LocalDate, onClick: (() -> Unit)? = null) {
+fun RecurringRow(item: RecurringEntity, today: LocalDate, categoryName: String? = null, onClick: (() -> Unit)? = null) {
     val days = item.nextDue.toEpochDay() - today.toEpochDay()
     val due = when {
+        !item.active && item.detected -> "Buchung vom ${item.nextDue.shortLabel()} blieb aus"
         !item.active -> "pausiert"
         days < 0 -> "überfällig seit ${item.nextDue.dayMonthLabel()}"
         days == 0L -> "heute"
@@ -161,14 +260,26 @@ fun RecurringRow(item: RecurringEntity, today: LocalDate, onClick: (() -> Unit)?
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Column(Modifier.weight(1f).padding(end = 12.dp)) {
-                Text(item.name, style = MaterialTheme.typography.bodyLarge, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Text(item.displayName, style = MaterialTheme.typography.bodyLarge, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 Text(
-                    "${item.interval.label} · $due",
+                    listOfNotNull(categoryName, if (categoryName == null) item.interval.label else null, due).joinToString(" · "),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
                 )
             }
-            AmountText(item.amountCents)
+            Column(horizontalAlignment = Alignment.End) {
+                AmountText(item.amountCents)
+                if (item.interval != RecurrenceInterval.MONTHLY) {
+                    // Auch seltenere Zahlungen bekommen ihren Monatspreis.
+                    Text(
+                        "Ø ${Money.format(item.yearlyCents() / 12)} / Monat",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
         }
         if (previous != null && item.amountCents < 0 && abs(item.amountCents) > abs(previous)) {
             Text(
@@ -202,6 +313,7 @@ fun RecurringEditScreen(itemId: Long, onDone: () -> Unit) {
     var loaded by remember { mutableStateOf<RecurringEntity?>(null) }
     var ready by rememberSaveable { mutableStateOf(itemId == 0L) }
     var name by rememberSaveable { mutableStateOf("") }
+    var alias by rememberSaveable { mutableStateOf("") }
     var isExpense by rememberSaveable { mutableStateOf(true) }
     var amount by rememberSaveable { mutableStateOf("") }
     var interval by rememberSaveable { mutableStateOf(RecurrenceInterval.MONTHLY) }
@@ -219,6 +331,7 @@ fun RecurringEditScreen(itemId: Long, onDone: () -> Unit) {
         loaded = item
         if (!ready) {
             name = item.name
+            alias = item.alias
             isExpense = item.amountCents <= 0
             amount = abs(item.amountCents).toFieldText()
             interval = item.interval
@@ -270,8 +383,16 @@ fun RecurringEditScreen(itemId: Long, onDone: () -> Unit) {
             OutlinedTextField(
                 value = name,
                 onValueChange = { name = it },
-                label = { Text("Bezeichnung") },
-                supportingText = { Text("Am besten so, wie der Empfänger im Kontoauszug heißt") },
+                label = { Text("Bezeichnung im Kontoauszug") },
+                supportingText = { Text("So, wie der Empfänger im Kontoauszug heißt – darüber werden die Zahlungen zugeordnet") },
+                singleLine = true,
+                modifier = Modifier.fillMaxWidth(),
+            )
+            OutlinedTextField(
+                value = alias,
+                onValueChange = { alias = it },
+                label = { Text("Anzeigename (optional)") },
+                supportingText = { Text("Nur zur Anzeige, etwa „Handyvertrag“. Hat keinen Einfluss darauf, welche Zahlungen dazugehören") },
                 singleLine = true,
                 modifier = Modifier.fillMaxWidth(),
             )
@@ -312,6 +433,7 @@ fun RecurringEditScreen(itemId: Long, onDone: () -> Unit) {
                     val base = loaded ?: RecurringEntity(name = "", amountCents = 0, nextDue = LocalDate.now())
                     val item = base.copy(
                         name = name.trim(),
+                        alias = alias.trim(),
                         amountCents = signed,
                         // Eine von Hand bestätigte Betragsänderung ist keine „Preiserhöhung" mehr.
                         previousAmountCents = null,
@@ -335,7 +457,7 @@ fun RecurringEditScreen(itemId: Long, onDone: () -> Unit) {
     if (confirmDelete) {
         ConfirmDialog(
             title = "Dauerposten entfernen?",
-            text = "„$name“ zählt dann nicht mehr als feste Zahlung. Die Umsätze selbst bleiben erhalten.",
+            text = "„${alias.ifBlank { name }}“ zählt dann nicht mehr als feste Zahlung. Die Umsätze selbst bleiben erhalten.",
             confirmLabel = "Entfernen",
             onConfirm = {
                 confirmDelete = false

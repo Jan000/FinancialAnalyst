@@ -42,6 +42,13 @@ enum class RecurrenceInterval(val label: String, val months: Int, val days: Int)
         BIWEEKLY -> amountCents * 26 / 12
         else -> amountCents / months
     }
+
+    /** Was ein Betrag pro Intervall in einem Jahr ausmacht. */
+    fun yearlyCents(amountCents: Long): Long = when (this) {
+        WEEKLY -> amountCents * 52
+        BIWEEKLY -> amountCents * 26
+        else -> amountCents * 12 / months
+    }
 }
 
 /** Schlanke Sicht auf einen Umsatz, auf der die gesamte Finanzlogik arbeitet. */

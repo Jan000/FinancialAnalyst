@@ -338,9 +338,13 @@ class FinanceRepository(
     /** Gleicht die Dauerposten mit der Umsatzhistorie ab: neue erkennen, Termine und Beträge fortschreiben. */
     suspend fun syncRecurring(today: LocalDate = LocalDate.now()) = db.withTransaction {
         val transferCategories = db.categories().all().filter { it.kind == CategoryKind.TRANSFER }.map { it.id }.toSet()
-        val txs = db.transactions().all()
+        val everything = db.transactions().all()
+        val txs = everything
             .filter { it.transferPeerId == null && it.categoryId !in transferCategories }
             .map { it.toTx() }
+        // Jüngste Buchung je Schlüssel, Umbuchungen eingeschlossen.
+        val latestOfAnyKind = everything.groupBy { RecurringDetector.matchKey(it.toTx()) }
+            .mapValues { entry -> entry.value.maxOf { it.bookingDate } }
         val detected = RecurringDetector.detect(txs, today).associateBy { it.matchKey }
         val existing = db.recurring().all()
         val known = existing.associateBy { it.matchKey }
@@ -385,9 +389,14 @@ class FinanceRepository(
                 continue
             }
             if (old.detected) {
-                // Nicht mehr erkannt und deutlich überfällig: läuft offenbar nicht mehr.
-                // Ebenso, wenn die letzten Buchungen inzwischen als Umbuchung zählen und der Rest lange zurückliegt.
                 val latest = latestByKey.getValue(old.matchKey)
+                if ((latestOfAnyKind[old.matchKey] ?: latest) > latest) {
+                    // Die jüngsten Buchungen zählen inzwischen als Umbuchung (etwa die Bankseite einer PayPal-Zahlung):
+                    // der Posten war nur der Schatten einer Zahlung, die auf dem anderen Konto schon geführt wird.
+                    db.recurring().delete(old)
+                    continue
+                }
+                // Nicht mehr erkannt und deutlich überfällig: läuft offenbar nicht mehr.
                 val stale = old.nextDue.plusDays(45) < today || old.interval.next(latest).plusDays(10) < today
                 if (old.active && stale) db.recurring().upsert(old.copy(active = false))
                 continue

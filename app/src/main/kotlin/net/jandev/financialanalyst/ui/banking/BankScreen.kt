@@ -82,7 +82,7 @@ private fun readPem(context: Context, uri: Uri): Pair<String, String?> {
 }
 
 @Composable
-fun BankScreen(onBack: () -> Unit) {
+fun BankScreen(onBack: () -> Unit, onOpenLoans: () -> Unit = {}) {
     val app = LocalApp.current
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
@@ -185,12 +185,42 @@ fun BankScreen(onBack: () -> Unit) {
                             val last = item.account.lastSync?.let {
                                 Instant.ofEpochSecond(it).atZone(ZoneId.systemDefault()).format(timeFormat)
                             }
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Column(Modifier.weight(1f)) {
+                                    Text(item.account.name, style = MaterialTheme.typography.bodyMedium)
+                                    Text(
+                                        last?.let { "zuletzt abgerufen $it" } ?: "noch nicht abgerufen",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    )
+                                }
+                                TextButton(
+                                    enabled = busy == null && item.account.externalId != null,
+                                    onClick = {
+                                        run("${item.account.name} wird abgerufen …") { report = sync.syncAll(setOf(item.account.id)) }
+                                    },
+                                ) { Text("Abrufen") }
+                            }
+                        }
+                        if (linked.isEmpty()) {
                             Text(
-                                "${item.account.name} · ${last?.let { "zuletzt abgerufen $it" } ?: "noch nicht abgerufen"}",
+                                BankSync.NO_ACCOUNTS_HINT + " Einen Kredit führst du unter „Kredite“; dort rechnet die App Restschuld und Zinsen.",
                                 style = MaterialTheme.typography.bodySmall,
+                                color = LocalFinanceColors.current.warning,
                             )
+                            TextButton(onClick = onOpenLoans) { Text("Zu den Krediten") }
                         }
                         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            if (linked.size > 1) {
+                                TextButton(
+                                    enabled = busy == null,
+                                    onClick = {
+                                        run("${session.bankName} wird abgerufen …") {
+                                            report = sync.syncAll(linked.map { it.account.id }.toSet())
+                                        }
+                                    },
+                                ) { Text("Alle abrufen") }
+                            }
                             TextButton(
                                 enabled = busy == null,
                                 onClick = {
@@ -213,11 +243,12 @@ fun BankScreen(onBack: () -> Unit) {
                         OutlinedButton(
                             enabled = busy == null,
                             onClick = { run("Umsätze werden abgerufen …") { report = sync.syncAll() } },
-                        ) { Text("Jetzt abrufen") }
+                        ) { Text("Alle Banken abrufen") }
                     }
                 }
                 Text(
-                    "Die App ruft dreimal täglich automatisch ab. Banken erlauben meist nur vier Abrufe pro Tag ohne erneute Bestätigung.",
+                    "Die App ruft dreimal täglich automatisch ab. Banken erlauben meist nur vier Abrufe pro Tag ohne erneute Bestätigung – " +
+                        "mit „Abrufen“ an einem einzelnen Konto bleiben die übrigen davon unberührt.",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
@@ -307,11 +338,12 @@ private fun openBrowser(context: Context, url: String) {
 private fun ReportCard(report: SyncReport) {
     SectionCard(title = "Letzter Abruf") {
         if (report.accounts > 0) {
+            val fetched = if (report.accounts == 1) "1 Konto abgerufen" else "${report.accounts} Konten abgerufen"
             Text(
                 when (report.newTransactions) {
-                    0 -> "${report.accounts} Konten abgerufen, keine neuen Umsätze."
-                    1 -> "${report.accounts} Konten abgerufen, 1 neuer Umsatz."
-                    else -> "${report.accounts} Konten abgerufen, ${report.newTransactions} neue Umsätze."
+                    0 -> "$fetched, keine neuen Umsätze."
+                    1 -> "$fetched, 1 neuer Umsatz."
+                    else -> "$fetched, ${report.newTransactions} neue Umsätze."
                 },
             )
         }

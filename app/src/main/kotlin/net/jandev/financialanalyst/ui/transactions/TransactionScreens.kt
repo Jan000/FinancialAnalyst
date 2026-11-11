@@ -70,6 +70,9 @@ import androidx.compose.ui.graphics.Color
 import net.jandev.financialanalyst.data.db.GroupEntity
 import net.jandev.financialanalyst.ui.theme.LocalFinanceColors
 import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.geometry.Offset
+import net.jandev.financialanalyst.ui.common.dayMonthLabel
 import net.jandev.financialanalyst.domain.Budget
 import net.jandev.financialanalyst.domain.RecurringPlan
 import java.time.LocalDate
@@ -98,14 +101,14 @@ fun TransactionsScreen(onEdit: (Long) -> Unit, onAddAccount: () -> Unit, onOpenR
         val origin = HashMap<Long, Long>()
         var nextId = -1L
         val rows = recurring.filter { it.active && !it.dismissed }.flatMap { item ->
-            Budget.plannedFlows(listOf(RecurringPlan(item.name, item.amountCents, item.interval, item.nextDue)), today, today.plusDays(PLANNED_DAYS))
+            Budget.plannedFlows(listOf(RecurringPlan(item.displayName, item.amountCents, item.interval, item.nextDue)), today, today.plusDays(PLANNED_DAYS))
                 .map { flow ->
                     TransactionEntity(
                         id = nextId--,
                         accountId = item.accountId ?: 0,
                         bookingDate = flow.date,
                         amountCents = flow.amountCents,
-                        counterparty = item.name,
+                        counterparty = item.displayName,
                         categoryId = item.categoryId,
                     ).also { origin[it.id] = item.id }
                 }
@@ -157,14 +160,37 @@ fun TransactionsScreen(onEdit: (Long) -> Unit, onAddAccount: () -> Unit, onOpenR
                     categoryNames[it.categoryId]?.lowercase()?.contains(q) == true ||
                     Money.format(abs(it.amountCents)).contains(q)
             }
-            (expected + filtered).groupBy { it.bookingDate }.toList().sortedByDescending { it.first }
+            // Die zwei Seiten einer Umbuchung rücken zusammen, auch wenn sie an verschiedenen Tagen gebucht sind.
+            val byId = filtered.associateBy { it.id }
+            val partner = HashMap<Long, Long>()
+            for (tx in filtered) {
+                val peer = tx.transferPeerId ?: continue
+                if (peer !in byId || tx.id in partner || peer in partner) continue
+                partner[tx.id] = peer
+                partner[peer] = tx.id
+            }
+            val placed = HashSet<Long>()
+            val entries = ArrayList<List<TransactionEntity>>()
+            for (tx in (expected + filtered).sortedByDescending { it.bookingDate }) {
+                if (!placed.add(tx.id)) continue
+                val other = partner[tx.id]?.let(byId::get)
+                if (other == null) {
+                    entries.add(listOf(tx))
+                } else {
+                    placed.add(other.id)
+                    // Der Abgang steht oben, der Eingang darunter.
+                    entries.add(listOf(tx, other).sortedBy { it.amountCents })
+                }
+            }
+            // Ein Paar steht am Tag seiner jüngeren Buchung.
+            entries.groupBy { entry -> entry.maxOf { it.bookingDate } }.toList().sortedByDescending { it.first }
         }
 
         Column(Modifier.fillMaxSize().padding(padding)) {
             OutlinedTextField(
                 value = query,
                 onValueChange = { query = it },
-                placeholder = { Text("Suchen · lange drücken ändert die Kategorie") },
+                placeholder = { Text("Suchen") },
                 leadingIcon = { Icon(Icons.Filled.Search, contentDescription = null) },
                 trailingIcon = {
                     if (query.isNotEmpty()) {
@@ -187,26 +213,53 @@ fun TransactionsScreen(onEdit: (Long) -> Unit, onAddAccount: () -> Unit, onOpenR
                 )
             } else {
                 LazyColumn(contentPadding = PaddingValues(bottom = 96.dp)) {
-                    grouped.forEach { (date, items) ->
+                    grouped.forEach { (date, entries) ->
                         item(key = "h${date.toEpochDay()}") {
                             // Bis heute zählt, was gebucht ist; an künftigen Tagen, was erwartet wird.
-                            DayHeader(date, items.filter { it.id > 0 || date > today }.sumOf { it.amountCents }, dimmed = date > today)
+                            val counted = entries.flatMap { entry ->
+                                // Bankabbuchung und Kauf über PayPal sind dieselbe Ausgabe: nur der Kauf zählt in die Tagessumme.
+                                if (entry.size == 2 && (entry[0].amountCents < 0) == (entry[1].amountCents < 0)) {
+                                    listOf(entry.firstOrNull { it.transferPeerId == null } ?: entry[1])
+                                } else {
+                                    entry
+                                }
+                            }
+                            DayHeader(date, counted.filter { it.id > 0 || date > today }.sumOf { it.amountCents }, dimmed = date > today)
                         }
-                        items(items, key = { it.id }) { tx ->
-                            val isPlanned = tx.id < 0
-                            TransactionRow(
-                                tx = tx,
-                                subtitle = listOfNotNull(
-                                    "Geplant".takeIf { isPlanned },
-                                    categoryNames[tx.categoryId] ?: "Ohne Kategorie",
-                                    accountNames[tx.accountId],
-                                ).joinToString(" · "),
-                                onClick = { if (isPlanned) planned.second[tx.id]?.let(onOpenRecurring) else onEdit(tx.id) },
-                                onLongClick = if (isPlanned) null else ({ pickingId = tx.id }),
-                                dimmed = isPlanned || tx.bookingDate > today,
-                                categoryColor = categoryColors[tx.categoryId] ?: MaterialTheme.colorScheme.outlineVariant,
-                                group = groupMarks[tx.groupId],
-                            )
+                        items(entries, key = { it.first().id }) { entry ->
+                            val row: @Composable (TransactionEntity, Dp, RowLink) -> Unit = { tx, padding, link ->
+                                val isPlanned = tx.id < 0
+                                TransactionRow(
+                                    tx = tx,
+                                    subtitle = listOfNotNull(
+                                        "Geplant".takeIf { isPlanned },
+                                        // Im Paar kann eine Seite an einem anderen Tag gebucht sein als die Überschrift sagt.
+                                        tx.bookingDate.dayMonthLabel().takeIf { tx.bookingDate != date },
+                                        categoryNames[tx.categoryId] ?: "Ohne Kategorie",
+                                        accountNames[tx.accountId],
+                                    ).joinToString(" · "),
+                                    onClick = { if (isPlanned) planned.second[tx.id]?.let(onOpenRecurring) else onEdit(tx.id) },
+                                    onLongClick = if (isPlanned) null else ({ pickingId = tx.id }),
+                                    horizontalPadding = padding,
+                                    dimmed = isPlanned || tx.bookingDate > today,
+                                    categoryColor = categoryColors[tx.categoryId] ?: MaterialTheme.colorScheme.outlineVariant,
+                                    group = groupMarks[tx.groupId],
+                                    link = link,
+                                )
+                            }
+                            if (entry.size == 1) {
+                                row(entry[0], 16.dp, RowLink.NONE)
+                            } else {
+                                Column(
+                                    Modifier
+                                        .padding(horizontal = 8.dp, vertical = 4.dp)
+                                        .clip(RoundedCornerShape(12.dp))
+                                        .background(MaterialTheme.colorScheme.surfaceContainer),
+                                ) {
+                                    row(entry[0], 8.dp, RowLink.DOWN)
+                                    row(entry[1], 8.dp, RowLink.UP)
+                                }
+                            }
                         }
                     }
                 }
@@ -218,6 +271,9 @@ fun TransactionsScreen(onEdit: (Long) -> Unit, onAddAccount: () -> Unit, onOpenR
         }
     }
 }
+
+/** Verbindungslinie zwischen den zwei Zeilen einer Umbuchung: vom Farbpunkt nach unten bzw. von oben zum Farbpunkt. */
+enum class RowLink { NONE, DOWN, UP }
 
 /** So weit voraus zeigt die Umsatzliste erwartete Buchungen der Dauerposten. */
 private const val PLANNED_DAYS = 31L
@@ -256,7 +312,9 @@ fun TransactionRow(
     group: Pair<String, Color>? = null,
     /** Ausgegraut: Buchung liegt in der Zukunft oder ist erst geplant. */
     dimmed: Boolean = false,
+    link: RowLink = RowLink.NONE,
 ) {
+    val linkColor = MaterialTheme.colorScheme.outline
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -268,6 +326,15 @@ fun TransactionRow(
                     Modifier
                 },
             )
+            .drawBehind {
+                if (link == RowLink.NONE) return@drawBehind
+                // Mitte des Farbpunkts; die Linie lässt um ihn herum etwas Luft.
+                val x = (horizontalPadding + 5.dp).toPx()
+                val gap = 9.dp.toPx()
+                val from = if (link == RowLink.DOWN) size.height / 2 + gap else 0f
+                val to = if (link == RowLink.DOWN) size.height else size.height / 2 - gap
+                drawLine(linkColor, Offset(x, from), Offset(x, to), strokeWidth = 2.dp.toPx())
+            }
             .padding(horizontal = horizontalPadding, vertical = 10.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {

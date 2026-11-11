@@ -189,7 +189,8 @@ class EnableBankingApi(
     suspend fun createSession(code: String): SessionResponse =
         call("/sessions", method = "POST", body = json.encodeToString(CreateSessionRequest.serializer(), CreateSessionRequest(code)))
 
-    suspend fun session(sessionId: String): SessionStatus = call("/sessions/$sessionId")
+    suspend fun session(sessionId: String, inspect: ((String) -> Unit)? = null): SessionStatus =
+        call("/sessions/$sessionId", inspect = inspect)
 
     suspend fun deleteSession(sessionId: String) {
         call<ApiError>("/sessions/$sessionId", method = "DELETE")

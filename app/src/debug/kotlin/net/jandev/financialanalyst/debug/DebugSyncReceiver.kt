@@ -22,6 +22,11 @@ class DebugSyncReceiver : BroadcastReceiver() {
                     Log.d("BankDiag", "Banken (${banks.size} gesamt) mit „$find“: $hits")
                     return@launch
                 }
+                // --ez sessions true beschreibt nur die Sitzungen, ohne die Banken abzufragen.
+                if (intent.getBooleanExtra("sessions", false)) {
+                    container.bankSync.describeSessions().forEach { Log.d("BankDiag", it) }
+                    return@launch
+                }
                 val report = container.bankSync.syncAll()
                 container.lastSyncReport.value = report
                 Log.d("BankDiag", "Abruf fertig: ${report.accounts} Konten, ${report.newTransactions} neue Umsätze, Fehler ${report.errors}")

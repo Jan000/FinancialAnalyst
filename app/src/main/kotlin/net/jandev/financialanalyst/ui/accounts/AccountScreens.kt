@@ -41,6 +41,10 @@ import kotlinx.coroutines.launch
 import net.jandev.financialanalyst.data.db.AccountEntity
 import net.jandev.financialanalyst.data.db.AccountWithBalance
 import net.jandev.financialanalyst.domain.AccountType
+import net.jandev.financialanalyst.domain.ConnectorType
+import net.jandev.financialanalyst.ui.loans.remainingDebts
+import androidx.compose.material3.OutlinedButton
+import java.time.LocalDate
 import net.jandev.financialanalyst.domain.Money
 import net.jandev.financialanalyst.ui.common.AmountText
 import net.jandev.financialanalyst.ui.common.ConfirmDialog
@@ -56,10 +60,18 @@ import net.jandev.financialanalyst.ui.common.toFieldText
 import net.jandev.financialanalyst.ui.common.toPercentText
 
 @Composable
-fun AccountsScreen(onBack: () -> Unit, onEdit: (Long) -> Unit) {
+fun AccountsScreen(onBack: () -> Unit, onEdit: (Long) -> Unit, onOpenLoan: (Long) -> Unit = {}) {
     val app = LocalApp.current
     val accounts by app.repository.accounts.collectAsStateWithLifecycle(initialValue = null)
     var showEmpty by rememberSaveable { mutableStateOf(false) }
+    val loans by app.repository.loans.collectAsStateWithLifecycle(initialValue = emptyList())
+    val extras by app.repository.loanExtraPayments.collectAsStateWithLifecycle(initialValue = emptyList())
+    val changes by app.repository.loanRateChanges.collectAsStateWithLifecycle(initialValue = emptyList())
+    val transactions by app.repository.transactions.collectAsStateWithLifecycle(initialValue = emptyList())
+    val today = remember { LocalDate.now() }
+    val debts = remember(loans, extras, changes, transactions, today) {
+        remainingDebts(loans, extras, changes, transactions, today).filter { it.second > 0 }
+    }
 
     Screen(
         title = "Konten",
@@ -73,7 +85,7 @@ fun AccountsScreen(onBack: () -> Unit, onEdit: (Long) -> Unit) {
         },
     ) { padding ->
         val list = accounts ?: return@Screen
-        if (list.isEmpty()) {
+        if (list.isEmpty() && debts.isEmpty()) {
             EmptyState(
                 title = "Noch keine Konten",
                 hint = "Lege dein erstes Konto an. Umsätze kannst du danach manuell erfassen oder importieren.",
@@ -99,6 +111,32 @@ fun AccountsScreen(onBack: () -> Unit, onEdit: (Long) -> Unit) {
                                     else -> "$empty Konten mit 0 € anzeigen"
                                 },
                             )
+                        }
+                    }
+                }
+                if (debts.isNotEmpty()) {
+                    // Kredite gibt keine Bank über die Kontoschnittstelle heraus; sie stehen hier mit ihrer errechneten Restschuld.
+                    item(key = "loans-head") {
+                        Text(
+                            "Kredite",
+                            style = MaterialTheme.typography.titleSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.padding(top = 8.dp),
+                        )
+                    }
+                    items(debts, key = { "loan${it.first.id}" }) { (loan, remaining) ->
+                        SectionCard(modifier = Modifier.clickable { onOpenLoan(loan.id) }) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Column(Modifier.weight(1f)) {
+                                    Text(loan.name, style = MaterialTheme.typography.titleMedium)
+                                    Text(
+                                        "Kredit über ${Money.format(loan.principalCents)} · Restschuld",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    )
+                                }
+                                AmountText(-remaining, style = MaterialTheme.typography.titleMedium, negativeIsAlarming = true)
+                            }
                         }
                     }
                 }
@@ -147,6 +185,8 @@ fun AccountEditScreen(accountId: Long, onDone: () -> Unit) {
     var overdraftRate by rememberSaveable { mutableStateOf("") }
     var includeInBudget by rememberSaveable { mutableStateOf(true) }
     var confirmDelete by remember { mutableStateOf(false) }
+    var syncing by remember { mutableStateOf(false) }
+    var syncResult by remember { mutableStateOf<String?>(null) }
 
     LaunchedEffect(accountId) {
         if (accountId == 0L) return@LaunchedEffect
@@ -247,6 +287,42 @@ fun AccountEditScreen(accountId: Long, onDone: () -> Unit) {
                     )
                 }
                 Switch(checked = includeInBudget, onCheckedChange = { includeInBudget = it })
+            }
+            val connected = loaded?.takeIf { it.connector == ConnectorType.ENABLE_BANKING && it.externalId != null }
+            if (connected != null) {
+                SectionCard(title = "Bankabruf") {
+                    Text(
+                        "Holt Umsätze und Kontostand nur für dieses Konto. Der Kontostand oben wird dabei von der Bank übernommen.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    syncResult?.let { Text(it, style = MaterialTheme.typography.bodySmall) }
+                    OutlinedButton(
+                        enabled = !syncing,
+                        onClick = {
+                            syncing = true
+                            syncResult = null
+                            scope.launch {
+                                syncResult = try {
+                                    val report = app.bankSync.syncAll(setOf(connected.id))
+                                    app.repository.accountWithBalance(connected.id)?.let {
+                                        loaded = it.account
+                                        balance = it.balanceCents.toFieldText()
+                                    }
+                                    report.errors.firstOrNull() ?: when (report.newTransactions) {
+                                        0 -> "Abgerufen, keine neuen Umsätze."
+                                        1 -> "Abgerufen, 1 neuer Umsatz."
+                                        else -> "Abgerufen, ${report.newTransactions} neue Umsätze."
+                                    }
+                                } catch (e: Exception) {
+                                    e.message ?: "Der Abruf ist gescheitert."
+                                } finally {
+                                    syncing = false
+                                }
+                            }
+                        },
+                    ) { Text(if (syncing) "Wird abgerufen …" else "Dieses Konto jetzt abrufen") }
+                }
             }
             Button(
                 enabled = valid,

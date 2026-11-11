@@ -34,7 +34,7 @@ object BudgetCalculator {
 
         val period = Budget.period(today, settings.budgetStartDay)
         val flows = Budget.plannedFlows(
-            active.map { RecurringPlan(it.name, it.amountCents, it.interval, it.nextDue) },
+            active.map { RecurringPlan(it.displayName, it.amountCents, it.interval, it.nextDue) },
             today,
             period.endInclusive,
         )

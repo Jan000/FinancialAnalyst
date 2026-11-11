@@ -148,6 +148,7 @@ data class AutoRuleConditionEntity(
 @Entity(tableName = "recurring")
 data class RecurringEntity(
     @PrimaryKey(autoGenerate = true) val id: Long = 0,
+    /** Bezeichnung wie im Kontoauszug; aus ihr entsteht bei von Hand angelegten Posten der [matchKey]. */
     val name: String,
     /** Normalisierte Gegenpartei, über die neue Umsätze dem Posten zugeordnet werden. */
     val matchKey: String = "",
@@ -166,7 +167,12 @@ data class RecurringEntity(
     val contractEnd: LocalDate? = null,
     val noticeDays: Int? = null,
     val note: String = "",
-)
+    /** Frei gewählter Anzeigename; dient nur der Anzeige und nie der Zuordnung von Zahlungen. */
+    val alias: String = "",
+) {
+    /** Was die Oberfläche zeigt: der Anzeigename, sonst die Bezeichnung. */
+    val displayName: String get() = alias.ifBlank { name }
+}
 
 @Entity(tableName = "loans")
 data class LoanEntity(
