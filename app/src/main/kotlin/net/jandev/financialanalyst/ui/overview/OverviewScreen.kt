@@ -1,5 +1,9 @@
 package net.jandev.financialanalyst.ui.overview
 
+import net.jandev.financialanalyst.ui.transactions.TransactionEntry
+import net.jandev.financialanalyst.ui.transactions.pairEntries
+import net.jandev.financialanalyst.ui.transactions.rememberRowContext
+
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
@@ -162,13 +166,17 @@ fun OverviewScreen(
             }
             if (transactions.isNotEmpty()) {
                 SectionCard(title = "Letzte Umsätze") {
+                    // Dieselben Zeilen wie in der Umsatzliste: Kauf über PayPal als der Kauf, Umbuchung als eine Zeile.
+                    val rowContext = rememberRowContext()
+                    val recent = remember(transactions) { pairEntries(transactions.take(20)).take(5) }
                     Column(Modifier.padding(horizontal = 0.dp)) {
-                        transactions.take(5).forEachIndexed { index, tx ->
+                        recent.forEachIndexed { index, entry ->
                             if (index > 0) HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
-                            TransactionRow(
-                                tx = tx,
-                                subtitle = categoryNames[tx.categoryId] ?: "Ohne Kategorie",
-                                onClick = { onEditTransaction(tx.id) },
+                            TransactionEntry(
+                                entry = entry,
+                                day = null,
+                                ctx = rowContext,
+                                onClick = { onEditTransaction(it.id) },
                                 horizontalPadding = 0.dp,
                             )
                         }

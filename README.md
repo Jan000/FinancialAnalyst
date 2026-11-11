@@ -93,6 +93,7 @@ Ohne Google-Einrichtung funktioniert die Sicherung als Datei (**Datei speichern 
   Dauerposten für die nächsten 31 Tage. Eine Umbuchung
   steht als eine Zeile („N26 → Tagesgeld", Betrag ohne Vorzeichen); ein Kauf über PayPal als der Kauf selbst mit
   „PayPal über N26". Die jeweils andere Buchung ist im Umsatz unter „Gegenbuchung" bzw. „Bezahlt über" erreichbar.
+  Übersicht, Analyse und Gruppen zeigen dieselben Zeilen; Zahlungen eines Fixkosten-Postens tragen dessen Anzeigenamen.
 - **Positionen** (im Umsatz unter „Enthaltene Positionen"): einen Umsatz wie die Kreditkartenabrechnung in Einzelkäufe
   aufteilen, jeder mit eigener Kategorie und Gruppe. Am Kontostand ändert sich nichts; in Analyse, Budgets und Gruppen
   ersetzen die Positionen den Umsatz, der nicht aufgeteilte Rest bleibt bei ihm. In der Umsatzliste stehen sie

@@ -30,6 +30,7 @@ import net.jandev.financialanalyst.ui.common.Screen
 import net.jandev.financialanalyst.ui.common.shortLabel
 import net.jandev.financialanalyst.ui.transactions.CategoryPickerDialog
 import net.jandev.financialanalyst.ui.transactions.TransactionRow
+import net.jandev.financialanalyst.ui.transactions.rememberRowContext
 import java.time.LocalDate
 
 /**
@@ -49,6 +50,7 @@ fun CategoryTransactionsScreen(
     merchantKey: String? = null,
 ) {
     val app = LocalApp.current
+    val rowContext = rememberRowContext()
     val transactions by app.repository.analysisTransactions.collectAsStateWithLifecycle(initialValue = null)
     val categories by app.repository.categories.collectAsStateWithLifecycle(initialValue = emptyList())
     val accounts by app.repository.accounts.collectAsStateWithLifecycle(initialValue = emptyList())
@@ -112,6 +114,7 @@ fun CategoryTransactionsScreen(
             items(list, key = { it.id }) { tx ->
                 TransactionRow(
                     tx = tx,
+                    title = rowContext.titleOf(tx),
                     subtitle = listOfNotNull(
                         tx.bookingDate.shortLabel(),
                         // Beim Empfänger mischen sich Kategorien; dort gehört sie in die Zeile.

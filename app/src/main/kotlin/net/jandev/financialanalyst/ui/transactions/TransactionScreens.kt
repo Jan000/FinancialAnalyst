@@ -77,6 +77,7 @@ import net.jandev.financialanalyst.ui.theme.LocalFinanceColors
 import androidx.compose.ui.draw.alpha
 import net.jandev.financialanalyst.ui.common.dayMonthLabel
 import net.jandev.financialanalyst.domain.Budget
+import net.jandev.financialanalyst.domain.ContractSchedule
 import net.jandev.financialanalyst.domain.RecurringPlan
 import java.time.LocalDate
 import kotlin.math.abs
@@ -93,34 +94,36 @@ fun TransactionsScreen(onEdit: (Long) -> Unit, onAddAccount: () -> Unit, onOpenR
     // Für welche Suche die Liste schon auf die jüngste echte Buchung gerückt wurde; überlebt den Wechsel in ein Detail.
     var positionedFor by rememberSaveable { mutableStateOf<String?>(null) }
 
-    val accountNames = remember(accounts) { accounts.associate { it.account.id to it.account.name } }
-    val categoryNames = remember(categories) { categories.associate { it.id to it.name } }
-    val groups by app.repository.groups.collectAsStateWithLifecycle(initialValue = emptyList())
-    val palette = LocalFinanceColors.current.chart
-    val categoryColors = remember(categories, palette) { categories.associate { it.id to palette[it.colorIndex.mod(palette.size)] } }
-    val groupMarks = remember(groups, palette) { groups.associate { it.id to (it.name to palette[it.colorIndex.mod(palette.size)]) } }
-
+    val ctx = rememberRowContext()
+    val categoryNames = ctx.categoryNames
+    val groupMarks = ctx.groupMarks
+    val splitsByParent = ctx.splitsByParent
     val recurring by app.repository.recurring.collectAsStateWithLifecycle(initialValue = emptyList())
-    val splits by app.repository.splits.collectAsStateWithLifecycle(initialValue = emptyList())
-    val splitsByParent = remember(splits) { splits.groupBy { it.parentId } }
     val today = remember { LocalDate.now() }
     // Was die Dauerposten in den nächsten Wochen erwarten lassen: als Umsätze mit negativer ID, die es noch nicht gibt.
     val planned = remember(recurring, today) {
         val origin = HashMap<Long, Long>()
         var nextId = -1L
         // Spar-Abos & Co. erscheinen nicht als eigene Buchung, sondern später als Position ihrer Abrechnung.
+        val until = today.plusDays(PLANNED_DAYS)
         val rows = recurring.filter { it.active && !it.dismissed && !it.isPosition }.flatMap { item ->
-            Budget.plannedFlows(listOf(item.plan()), today, today.plusDays(PLANNED_DAYS))
-                .map { flow ->
-                    TransactionEntity(
-                        id = nextId--,
-                        accountId = item.accountId ?: 0,
-                        bookingDate = flow.date,
-                        amountCents = flow.amountCents,
-                        counterparty = item.displayName,
-                        categoryId = item.categoryId,
-                    ).also { origin[it.id] = item.id }
-                }
+            // Bei Verträgen bleiben offene Beiträge mit ihrem eigentlichen Termin sichtbar; sie stehen unter heute.
+            val dues = if (item.isContract) {
+                ContractSchedule.openDues(item.plan(), until).map { maxOf(it.date, today) to (it.amountCents to it.date.takeIf { d -> d < today }) }
+            } else {
+                Budget.plannedFlows(listOf(item.plan()), today, until).map { it.date to (it.amountCents to null) }
+            }
+            dues.map { (date, value) ->
+                TransactionEntity(
+                    id = nextId--,
+                    accountId = item.accountId ?: 0,
+                    bookingDate = date,
+                    amountCents = value.first,
+                    counterparty = item.displayName,
+                    categoryId = item.categoryId,
+                    note = value.second?.let { "Offen seit ${it.shortLabel()}" }.orEmpty(),
+                ).also { origin[it.id] = item.id }
+            }
         }
         rows to origin
     }
@@ -148,7 +151,7 @@ fun TransactionsScreen(onEdit: (Long) -> Unit, onAddAccount: () -> Unit, onOpenR
             }
             return@Screen
         }
-        val filtered = remember(all, query, categoryNames, groupMarks, splitsByParent) {
+        val filtered = remember(all, query, ctx) {
             val q = query.trim().lowercase()
             if (q.isEmpty()) {
                 all
@@ -156,6 +159,7 @@ fun TransactionsScreen(onEdit: (Long) -> Unit, onAddAccount: () -> Unit, onOpenR
                 all.filter {
                     it.counterparty.lowercase().contains(q) ||
                         it.purpose.lowercase().contains(q) ||
+                        ctx.titleOf(it)?.lowercase()?.contains(q) == true ||
                         groupMarks[it.groupId]?.first?.lowercase()?.contains(q) == true ||
                         categoryNames[it.categoryId]?.lowercase()?.contains(q) == true ||
                         Money.format(abs(it.amountCents)).contains(q) ||
@@ -176,27 +180,7 @@ fun TransactionsScreen(onEdit: (Long) -> Unit, onAddAccount: () -> Unit, onOpenR
                     Money.format(abs(it.amountCents)).contains(q)
             }
             // Die zwei Seiten einer Umbuchung rücken zusammen, auch wenn sie an verschiedenen Tagen gebucht sind.
-            val byId = filtered.associateBy { it.id }
-            val partner = HashMap<Long, Long>()
-            for (tx in filtered) {
-                val peer = tx.transferPeerId ?: continue
-                if (peer !in byId || tx.id in partner || peer in partner) continue
-                partner[tx.id] = peer
-                partner[peer] = tx.id
-            }
-            val placed = HashSet<Long>()
-            val entries = ArrayList<List<TransactionEntity>>()
-            for (tx in (expected + filtered).sortedByDescending { it.bookingDate }) {
-                if (!placed.add(tx.id)) continue
-                val other = partner[tx.id]?.let(byId::get)
-                if (other == null) {
-                    entries.add(listOf(tx))
-                } else {
-                    placed.add(other.id)
-                    // Der Abgang steht oben, der Eingang darunter.
-                    entries.add(listOf(tx, other).sortedBy { it.amountCents })
-                }
-            }
+            val entries = pairEntries(filtered, expected)
             // Ein Paar steht am Tag seiner jüngeren Buchung.
             entries.groupBy { entry -> entry.maxOf { it.bookingDate } }.toList().sortedByDescending { it.first }
         }
@@ -248,62 +232,19 @@ fun TransactionsScreen(onEdit: (Long) -> Unit, onAddAccount: () -> Unit, onOpenR
                     grouped.forEach { (date, entries) ->
                         item(key = "h${date.toEpochDay()}") {
                             // Bis heute zählt, was gebucht ist; an künftigen Tagen, was erwartet wird.
-                            // Je Zeile ein Betrag: beim Kauf über PayPal der Kauf, eine Umbuchung gleicht sich aus.
-                            val counted = entries.flatMap { entry ->
-                                if (entry.size == 2 && (entry[0].amountCents < 0) == (entry[1].amountCents < 0)) listOf(entry.mainOf()) else entry
-                            }
-                            DayHeader(date, counted.filter { it.id > 0 || date > today }.sumOf { it.amountCents }, dimmed = date > today)
+                            val counted = entries.filter { entry -> entry.first().id > 0 || date > today }
+                            DayHeader(date, counted.sumOf { it.countedCents() }, dimmed = date > today)
                         }
                         items(entries, key = { it.first().id }) { entry ->
                             val main = entry.mainOf()
-                            val isPlanned = main.id < 0
-                            val other = entry.firstOrNull { it.id != main.id }
-                            val kind = when {
-                                other == null -> PairKind.SINGLE
-                                (other.amountCents < 0) == (main.amountCents < 0) -> PairKind.PAID_VIA
-                                else -> PairKind.TRANSFER
-                            }
-                            // Ein Paar steht am Tag seiner jüngeren Buchung; weicht eine Seite ab, steht ihr Datum dabei.
-                            val otherDate = other?.bookingDate?.takeIf { it != date }?.dayMonthLabel()
-                            val subtitle = when (kind) {
-                                PairKind.SINGLE -> listOfNotNull(
-                                    "Geplant".takeIf { isPlanned },
-                                    splitsByParent[main.id]?.size?.let { if (it == 1) "1 Position" else "$it Positionen" },
-                                    main.bookingDate.dayMonthLabel().takeIf { main.bookingDate != date },
-                                    categoryNames[main.categoryId] ?: "Ohne Kategorie",
-                                    accountNames[main.accountId],
-                                )
-                                // Kauf über PayPal & Co.: es zählt der Kauf; die Abbuchung beim Konto ist nur die Finanzierung.
-                                PairKind.PAID_VIA -> listOfNotNull(
-                                    categoryNames[main.categoryId] ?: "Ohne Kategorie",
-                                    "${accountNames[main.accountId]} über ${accountNames[other!!.accountId]}" + (otherDate?.let { " ($it)" } ?: ""),
-                                )
-                                PairKind.TRANSFER -> listOfNotNull(
-                                    "${accountNames[main.accountId]} → ${accountNames[other!!.accountId]}",
-                                    otherDate?.let { "Eingang $it" },
-                                )
-                            }.joinToString(" · ")
-                            TransactionRow(
-                                tx = main,
-                                title = if (kind == PairKind.TRANSFER) "Umbuchung" else null,
-                                subtitle = subtitle,
-                                onClick = { if (isPlanned) planned.second[main.id]?.let(onOpenRecurring) else onEdit(main.id) },
-                                onLongClick = if (isPlanned || kind == PairKind.TRANSFER) null else ({ pickingId = main.id }),
-                                dimmed = isPlanned || main.bookingDate > today,
-                                categoryColor = categoryColors[main.categoryId] ?: MaterialTheme.colorScheme.outlineVariant,
-                                group = groupMarks[main.groupId],
-                                // Eine Umbuchung ändert das Vermögen nicht: Betrag ohne Vorzeichen und Farbe.
-                                neutralAmount = kind == PairKind.TRANSFER,
+                            TransactionEntry(
+                                entry = entry,
+                                day = date,
+                                ctx = ctx,
+                                onClick = { tx -> if (tx.id < 0) planned.second[tx.id]?.let(onOpenRecurring) else onEdit(tx.id) },
+                                onLongClick = { tx -> pickingId = tx.id },
+                                dimmed = main.id < 0 || main.bookingDate > today,
                             )
-                            splitsByParent[main.id]?.forEach { split ->
-                                SplitRow(
-                                    split = split,
-                                    categoryName = categoryNames[split.categoryId] ?: "Ohne Kategorie",
-                                    categoryColor = categoryColors[split.categoryId] ?: MaterialTheme.colorScheme.outlineVariant,
-                                    group = groupMarks[split.groupId],
-                                    onClick = { onEdit(main.id) },
-                                )
-                            }
                         }
                     }
                 }
@@ -314,19 +255,6 @@ fun TransactionsScreen(onEdit: (Long) -> Unit, onAddAccount: () -> Unit, onOpenR
             CategoryPickerDialog(tx = picking, categories = categories, onDismiss = { pickingId = null }, onEditDetails = { onEdit(picking.id) })
         }
     }
-}
-
-/** Wie eine Zeile der Umsatzliste entstanden ist: ein Umsatz, ein Kauf über ein Zahlungskonto oder eine Umbuchung. */
-private enum class PairKind { SINGLE, PAID_VIA, TRANSFER }
-
-/**
- * Der Umsatz, für den eine Zeile steht: beim Kauf über PayPal der Kauf (er hat keinen Partner, die Bankseite zeigt
- * auf ihn), bei einer Umbuchung der Abgang.
- */
-private fun List<TransactionEntity>.mainOf(): TransactionEntity = when {
-    size == 1 -> first()
-    (this[0].amountCents < 0) == (this[1].amountCents < 0) -> firstOrNull { it.transferPeerId == null } ?: this[1]
-    else -> minBy { it.amountCents }
 }
 
 /** So weit voraus zeigt die Umsatzliste erwartete Buchungen der Dauerposten. */

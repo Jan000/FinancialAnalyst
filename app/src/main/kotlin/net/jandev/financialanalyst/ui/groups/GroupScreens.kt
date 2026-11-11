@@ -62,6 +62,7 @@ import net.jandev.financialanalyst.ui.common.SectionCard
 import net.jandev.financialanalyst.ui.common.shortLabel
 import net.jandev.financialanalyst.ui.theme.LocalFinanceColors
 import net.jandev.financialanalyst.ui.transactions.TransactionRow
+import net.jandev.financialanalyst.ui.transactions.rememberRowContext
 import kotlin.math.abs
 
 /** Farbe einer Gruppe aus der festen Diagrammpalette. */
@@ -193,6 +194,7 @@ fun GroupDialog(initial: GroupEntity?, suggestedColor: Int, onDismiss: () -> Uni
 @Composable
 fun GroupDetailScreen(groupId: Long, onBack: () -> Unit, onEditTransaction: (Long) -> Unit) {
     val app = LocalApp.current
+    val rowContext = rememberRowContext()
     val scope = rememberCoroutineScope()
     val groups by app.repository.groups.collectAsStateWithLifecycle(initialValue = null)
     val transactions by app.repository.analysisTransactions.collectAsStateWithLifecycle(initialValue = emptyList())
@@ -259,6 +261,7 @@ fun GroupDetailScreen(groupId: Long, onBack: () -> Unit, onEditTransaction: (Lon
                     Box(Modifier.weight(1f)) {
                         TransactionRow(
                             tx = tx,
+                            title = rowContext.titleOf(tx),
                             subtitle = listOfNotNull(tx.bookingDate.shortLabel(), accountNames[tx.accountId]).joinToString(" · "),
                             onClick = { onEditTransaction(tx.editTargetId) },
                         )
@@ -304,6 +307,7 @@ fun GroupDetailScreen(groupId: Long, onBack: () -> Unit, onEditTransaction: (Lon
 @Composable
 private fun AddTransactions(group: GroupEntity, onDone: () -> Unit) {
     val app = LocalApp.current
+    val rowContext = rememberRowContext()
     val scope = rememberCoroutineScope()
     val transactions by app.repository.transactions.collectAsStateWithLifecycle(initialValue = emptyList())
     val accounts by app.repository.accounts.collectAsStateWithLifecycle(initialValue = emptyList())
@@ -344,6 +348,7 @@ private fun AddTransactions(group: GroupEntity, onDone: () -> Unit) {
                         Box(Modifier.weight(1f)) {
                             TransactionRow(
                                 tx = tx,
+                                title = rowContext.titleOf(tx),
                                 subtitle = listOfNotNull(
                                     tx.bookingDate.shortLabel(),
                                     accountNames[tx.accountId],
