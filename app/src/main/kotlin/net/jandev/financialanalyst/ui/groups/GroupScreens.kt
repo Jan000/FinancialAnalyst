@@ -149,7 +149,7 @@ fun GroupsScreen(onBack: () -> Unit, onOpen: (Long) -> Unit) {
 }
 
 @Composable
-private fun GroupDialog(initial: GroupEntity?, suggestedColor: Int, onDismiss: () -> Unit, onSave: (String, Int) -> Unit) {
+fun GroupDialog(initial: GroupEntity?, suggestedColor: Int, onDismiss: () -> Unit, onSave: (String, Int) -> Unit) {
     var name by rememberSaveable { mutableStateOf(initial?.name.orEmpty()) }
     var color by rememberSaveable { mutableStateOf(initial?.colorIndex ?: suggestedColor.mod(8)) }
     val palette = LocalFinanceColors.current.chart

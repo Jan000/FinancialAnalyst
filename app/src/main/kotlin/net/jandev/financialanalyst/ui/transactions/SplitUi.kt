@@ -16,6 +16,11 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material3.Checkbox
+import androidx.compose.material3.SegmentedButton
+import androidx.compose.material3.SegmentedButtonDefaults
+import androidx.compose.material3.SingleChoiceSegmentedButtonRow
+import net.jandev.financialanalyst.ui.categories.CategoryDialog
+import net.jandev.financialanalyst.ui.groups.GroupDialog
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import net.jandev.financialanalyst.data.db.RecurringEntity
 import net.jandev.financialanalyst.data.toTx
@@ -70,6 +75,8 @@ fun SplitSection(parent: TransactionEntity, splits: List<SplitEntity>, categorie
     val categoryNames = remember(categories) { categories.associate { it.id to it.name } }
     val groupNames = remember(groups) { groups.associate { it.id to it.name } }
     val rest = parent.amountCents - splits.sumOf { it.amountCents }
+    // Gutschriften (Prämienpunkte, Rabatte) haben das umgekehrte Vorzeichen und mindern die Summe der Käufe.
+    val overflow = rest != 0L && (rest < 0) != (parent.amountCents < 0)
 
     SectionCard(title = "Enthaltene Positionen") {
         if (splits.isEmpty()) {
@@ -108,14 +115,14 @@ fun SplitSection(parent: TransactionEntity, splits: List<SplitEntity>, categorie
                 Text(
                     if (rest == 0L) "Vollständig aufgeteilt" else "Noch nicht aufgeteilt (bleibt bei „${categoryNames[parent.categoryId] ?: "Ohne Kategorie"}“)",
                     style = MaterialTheme.typography.bodySmall,
-                    color = if ((rest < 0) != (parent.amountCents < 0) && rest != 0L) LocalFinanceColors.current.warning else MaterialTheme.colorScheme.onSurfaceVariant,
+                    color = if (overflow) LocalFinanceColors.current.warning else MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.weight(1f).padding(end = 12.dp),
                 )
                 if (rest != 0L) AmountText(rest, style = MaterialTheme.typography.bodyMedium, colored = false)
             }
-            if ((rest < 0) != (parent.amountCents < 0) && rest != 0L) {
+            if (overflow) {
                 Text(
-                    "Die Positionen sind zusammen größer als der Umsatz.",
+                    "Die Positionen sind zusammen größer als der Umsatz. Rabatte oder eingelöste Prämienpunkte als Gutschrift eintragen.",
                     style = MaterialTheme.typography.bodySmall,
                     color = LocalFinanceColors.current.warning,
                 )
@@ -126,8 +133,8 @@ fun SplitSection(parent: TransactionEntity, splits: List<SplitEntity>, categorie
                 editing = SplitEntity(
                     parentId = parent.id,
                     date = parent.bookingDate,
-                    // Vorschlag: der noch offene Rest.
-                    amountCents = rest.takeIf { (it < 0) == (parent.amountCents < 0) && it != 0L } ?: 0,
+                    // Vorschlag: der noch offene Rest; übersteigen die Käufe die Abrechnung, die fehlende Gutschrift.
+                    amountCents = rest,
                 )
             },
         ) {
@@ -151,7 +158,12 @@ private fun SplitDialog(
 ) {
     val app = LocalApp.current
     val scope = rememberCoroutineScope()
-    val isExpense = parent.amountCents < 0
+    val parentIsExpense = parent.amountCents < 0
+    // Gutschrift: umgekehrtes Vorzeichen zum Umsatz, etwa ein Rabatt in der Kartenabrechnung.
+    var credit by rememberSaveable { mutableStateOf(split.amountCents != 0L && (split.amountCents < 0) != parentIsExpense) }
+    val isExpense = parentIsExpense != credit
+    var creatingCategory by remember { mutableStateOf(false) }
+    var creatingGroup by remember { mutableStateOf(false) }
     var description by rememberSaveable { mutableStateOf(split.description) }
     var amount by rememberSaveable { mutableStateOf(if (split.amountCents == 0L) "" else abs(split.amountCents).toFieldText()) }
     var day by rememberSaveable { mutableStateOf(split.date.toEpochDay()) }
@@ -163,8 +175,39 @@ private fun SplitDialog(
     var interval by rememberSaveable { mutableStateOf<RecurrenceInterval?>(null) }
     val chosenInterval = interval ?: template?.interval ?: RecurrenceInterval.MONTHLY
     val cents = Money.parse(amount)?.let(::abs)
-    val selectable = remember(categories) {
-        categories.filter { it.kind == (if (isExpense) CategoryKind.EXPENSE else CategoryKind.INCOME) }
+    val selectable = remember(categories, credit, parentIsExpense) {
+        // Eine Gutschrift mindert eine Ausgabenkategorie (Rabatt) oder ist eine Einnahme (Prämie): beide Arten zur Wahl.
+        if (credit) categories.filter { it.kind != CategoryKind.TRANSFER }
+        else categories.filter { it.kind == (if (parentIsExpense) CategoryKind.EXPENSE else CategoryKind.INCOME) }
+    }
+    val palette = LocalFinanceColors.current.chart
+
+    if (creatingCategory) {
+        CategoryDialog(
+            category = CategoryEntity(
+                name = "",
+                kind = if (isExpense) CategoryKind.EXPENSE else CategoryKind.INCOME,
+                colorIndex = palette.indices.firstOrNull { index -> categories.none { it.colorIndex == index } } ?: categories.size,
+            ),
+            usedNames = categories.map { it.name.lowercase() }.toSet(),
+            onSaved = { categoryId = it },
+            onDone = { creatingCategory = false },
+        )
+        return
+    }
+    if (creatingGroup) {
+        GroupDialog(
+            initial = null,
+            suggestedColor = groups.size,
+            onDismiss = { creatingGroup = false },
+            onSave = { name, color ->
+                scope.launch {
+                    groupId = app.repository.saveGroup(GroupEntity(name = name, colorIndex = color))
+                    creatingGroup = false
+                }
+            },
+        )
+        return
     }
 
     AlertDialog(
@@ -172,6 +215,25 @@ private fun SplitDialog(
         title = { Text(if (split.id == 0L) "Neue Position" else "Position bearbeiten") },
         text = {
             Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()) {
+                    SegmentedButton(
+                        selected = !credit,
+                        onClick = { credit = false; categoryId = null },
+                        shape = SegmentedButtonDefaults.itemShape(0, 2),
+                    ) { Text(if (parentIsExpense) "Kauf" else "Eingang") }
+                    SegmentedButton(
+                        selected = credit,
+                        onClick = { credit = true; categoryId = null },
+                        shape = SegmentedButtonDefaults.itemShape(1, 2),
+                    ) { Text(if (parentIsExpense) "Gutschrift" else "Abzug") }
+                }
+                if (credit) {
+                    Text(
+                        "Rabatt, eingelöste Prämienpunkte oder Erstattung: mindert den Betrag der Abrechnung.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
                 OutlinedTextField(
                     value = description,
                     onValueChange = { description = it },
@@ -184,19 +246,25 @@ private fun SplitDialog(
                 DateField(date = LocalDate.ofEpochDay(day), onDateChange = { day = it.toEpochDay() }, label = "Datum")
                 DropdownField(
                     label = "Kategorie",
-                    options = selectable,
+                    options = selectable + CategoryEntity(id = NEW_ID, name = NEW_CATEGORY, kind = CategoryKind.EXPENSE),
                     selected = categories.firstOrNull { it.id == categoryId },
-                    onSelect = { categoryId = it.id },
+                    onSelect = { if (it.id == NEW_ID) creatingCategory = true else categoryId = it.id },
                     optionLabel = { it.name },
                     placeholder = "Ohne Kategorie",
                 )
-                if (groups.isNotEmpty()) {
+                run {
                     val none = GroupEntity(id = 0, name = "Keine Gruppe")
                     DropdownField(
                         label = "Gruppe",
-                        options = listOf(none) + groups,
+                        options = listOf(none) + groups + GroupEntity(id = NEW_ID, name = NEW_GROUP),
                         selected = groups.firstOrNull { it.id == groupId },
-                        onSelect = { groupId = it.id.takeIf { id -> id != 0L } },
+                        onSelect = {
+                            when (it.id) {
+                                NEW_ID -> creatingGroup = true
+                                0L -> groupId = null
+                                else -> groupId = it.id
+                            }
+                        },
                         optionLabel = { it.name },
                         placeholder = "Keine Gruppe",
                     )
@@ -287,6 +355,11 @@ private fun SplitDialog(
         dismissButton = { TextButton(onClick = onDone) { Text("Abbrechen") } },
     )
 }
+
+/** Platzhalter in den Auswahllisten, der eine neue Kategorie bzw. Gruppe anlegt. */
+private const val NEW_ID = -1L
+private const val NEW_CATEGORY = "Neue Kategorie …"
+private const val NEW_GROUP = "Neue Gruppe …"
 
 /** Rhythmen, in denen Spar-Abos liefern. */
 private val POSITION_INTERVALS = listOf(
