@@ -68,6 +68,8 @@ fun CapitalChart(
     onSelect: (Int) -> Unit,
     description: String,
     modifier: Modifier = Modifier,
+    /** Ereignisse wie ein abbezahlter Kredit: Index in der gemeinsamen Achse (bisher + Prognose) und Beschriftung. */
+    events: List<Pair<Int, String>> = emptyList(),
 ) {
     val finance = LocalFinanceColors.current
     val historyColor = MaterialTheme.colorScheme.onSurfaceVariant
@@ -172,6 +174,18 @@ fun CapitalChart(
         line(history.mapIndexed { index, point -> index to point.cents }, historyColor)
         scenario?.let { list -> line(listOf(todayIndex to start) + list.mapIndexed { i, p -> todayIndex + 1 + i to p.cents }, scenarioColor, PathEffect.dashPathEffect(floatArrayOf(6.dp.toPx(), 4.dp.toPx()))) }
         line(listOf(todayIndex to start) + projection.mapIndexed { i, p -> todayIndex + 1 + i to p.cents }, projectionColor)
+
+        // Ereignisse: senkrechte Linie in Einnahmenfarbe, Punkt auf der Kurve und kurze Beschriftung oben.
+        events.filter { it.first in all.indices }.forEach { (index, label) ->
+            val ex = x(index)
+            drawLine(finance.income.copy(alpha = 0.7f), Offset(ex, top), Offset(ex, bottom), strokeWidth = 1.5f.dp.toPx(), pathEffect = PathEffect.dashPathEffect(floatArrayOf(3.dp.toPx(), 3.dp.toPx())))
+            drawCircle(surface, radius = 6.dp.toPx(), center = Offset(ex, y(all[index].cents)))
+            drawCircle(finance.income, radius = 4.dp.toPx(), center = Offset(ex, y(all[index].cents)))
+            val text = measurer.measure(label, labelStyle.copy(color = finance.income))
+            val tx = if (ex + 4.dp.toPx() + text.size.width <= right) ex + 4.dp.toPx() else ex - 4.dp.toPx() - text.size.width
+            drawRect(surface.copy(alpha = 0.85f), topLeft = Offset(tx - 2.dp.toPx(), top), size = androidx.compose.ui.geometry.Size(text.size.width + 4.dp.toPx(), text.size.height.toFloat()))
+            drawText(text, topLeft = Offset(tx, top))
+        }
 
         // Gewählter Punkt mit Ring in Flächenfarbe.
         if (selectedIndex in all.indices) {

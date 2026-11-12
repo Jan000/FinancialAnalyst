@@ -37,6 +37,7 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import net.jandev.financialanalyst.data.CapitalCalculator
 import net.jandev.financialanalyst.data.CapitalResult
+import net.jandev.financialanalyst.domain.CapitalForecast
 import net.jandev.financialanalyst.domain.CapitalMonth
 import net.jandev.financialanalyst.domain.CategoryKind
 import net.jandev.financialanalyst.domain.Money
@@ -173,6 +174,10 @@ fun CapitalScreen(onBack: () -> Unit) {
                     projection = future,
                     scenario = scenario,
                     trendPerMonthCents = projection.trendPerMonthCents,
+                    events = capital.endingLoans.mapNotNull { (item, loan) ->
+                        val index = projection.months.indexOfFirst { it.month == YearMonth.from(loan.payoff) }
+                        if (index < 0) null else history.size + index to "${item.displayName} abbezahlt"
+                    },
                     selectedIndex = chosen,
                     onSelect = { selected = it },
                     description = "Kapital heute ${Money.format(projection.startCents)}, ${horizon.title} voraussichtlich " +
@@ -193,7 +198,7 @@ fun CapitalScreen(onBack: () -> Unit) {
                 onIncludeOtherIncomeChange = { includeOtherIncome = it },
             )
             ScenarioCard(capital, savingsEuro, horizon) { savingsEuro = it }
-            TimelineCard(projection.months, horizon)
+            TimelineCard(projection.months, horizon, capital)
         }
     }
 }
@@ -225,6 +230,33 @@ private fun HeadlineCard(capital: CapitalResult, horizon: Horizon) {
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
+        // Was sich nach dem Ende eines Kredits ändert: Trend der Monate danach.
+        capital.endingLoans.forEach { (item, loan) ->
+            val endMonth = YearMonth.from(loan.payoff)
+            val before = p.months.filter { it.month <= endMonth }.takeLast(12)
+            val after = p.months.filter { it.month >= endMonth }.take(13)
+            // Ein Vergleich braucht je ein volles Jahr, sonst verzerren Sonderzahlungen und Jahresbeiträge den Trend.
+            if (after.size < 13 || before.size < 12) {
+                Text(
+                    "${item.displayName}: letzte Rate am ${loan.payoff.shortLabel()}, danach ${Money.format(loan.monthlyPaymentCents)} mehr im Monat. " +
+                        "Wähle 5 Jahre, um den Trend davor und danach zu vergleichen.",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = finance.income,
+                )
+            } else {
+                val earlier = CapitalForecast.slope(before.map { it.endCents })
+                val later = CapitalForecast.slope(after.map { it.endCents })
+                val interestBefore = before.drop(1).map { it.interestCents }.average()
+                val interestAfter = after.drop(1).map { it.interestCents }.average()
+                Text(
+                    "${item.displayName}: letzte Rate am ${loan.payoff.shortLabel()}, danach ${Money.format(loan.monthlyPaymentCents)} mehr im Monat. " +
+                        "Trend im Jahr davor ${Money.format(earlier, withSign = true)}, im Jahr danach ${Money.format(later, withSign = true)} pro Monat." +
+                        if (interestAfter < interestBefore - 100) " Einen Teil davon fressen die steigenden Dispozinsen wieder auf." else "",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = finance.income,
+                )
+            }
+        }
         p.backToPlus?.let {
             Text("Wieder im Plus ab ${it.shortLabel()}", style = MaterialTheme.typography.bodyMedium, color = finance.income)
         }
@@ -393,7 +425,7 @@ private fun ScenarioCard(capital: CapitalResult, savingsEuro: Int, horizon: Hori
 
 /** Monat für Monat, beim 5-Jahres-Zeitraum Jahr für Jahr; antippen zeigt die Zusammensetzung. */
 @Composable
-private fun TimelineCard(months: List<CapitalMonth>, horizon: Horizon) {
+private fun TimelineCard(months: List<CapitalMonth>, horizon: Horizon, capital: CapitalResult) {
     val byYear = horizon == Horizon.FIVE
     val rows: List<Pair<String, List<CapitalMonth>>> = if (byYear) {
         months.groupBy { it.month.year }.map { (year, list) -> year.toString() to list }
@@ -418,6 +450,13 @@ private fun TimelineCard(months: List<CapitalMonth>, horizon: Horizon) {
                         )
                     }
                     AmountText(end, withSign = false, colored = end < 0, negativeIsAlarming = true)
+                }
+                capital.endingLoans.filter { (_, loan) -> list.any { it.month == YearMonth.from(loan.payoff) } }.forEach { (item, loan) ->
+                    Text(
+                        "${item.displayName}: letzte Rate am ${loan.payoff.shortLabel()}, danach ${Money.format(loan.monthlyPaymentCents)} mehr im Monat",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = LocalFinanceColors.current.income,
+                    )
                 }
                 if (open == label) {
                     Column(Modifier.padding(top = 4.dp, start = 12.dp)) {
