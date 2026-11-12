@@ -66,17 +66,18 @@ object Budget {
                 continue
             }
             var due = plan.nextDue
+            val extras = YearlyExtras(plan.changes)
             if (due < today) {
                 if (due.plusDays(OVERDUE_GRACE_DAYS) >= today) {
                     // Wird für heute erwartet; der nächste reguläre Termin liegt dann strikt in der Zukunft.
-                    flows.add(PlannedFlow(today, plan.amountCents, plan.name))
+                    flows.add(PlannedFlow(today, plan.amountCents + extras.take(due), plan.name))
                     while (due <= today) due = plan.interval.next(due)
                 } else {
                     while (due < today) due = plan.interval.next(due)
                 }
             }
             while (due <= until) {
-                flows.add(PlannedFlow(due, plan.amountCents, plan.name))
+                flows.add(PlannedFlow(due, plan.amountCents + extras.take(due), plan.name))
                 due = plan.interval.next(due)
             }
         }

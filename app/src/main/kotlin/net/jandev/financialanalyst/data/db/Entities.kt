@@ -234,8 +234,19 @@ data class RecurringEntity(
     /** Was die Oberfläche zeigt: der Anzeigename, sonst die Bezeichnung. */
     val displayName: String get() = alias.ifBlank { name }
 
-    /** Beträge, um die herum Buchungen zum Posten gehören: der aktuelle und der vor der letzten Änderung. */
-    private val referenceAmounts: List<Long> get() = listOfNotNull(amountCents, previousAmountCents).filter { it != 0L }
+    /** Jährliche Sonderzahlungen (Urlaubs-, Weihnachtsgeld), die zum regulären Betrag dazukommen. */
+    val yearlyExtras: List<ScheduleChange> get() = ScheduleChange.yearly(ScheduleChange.decode(scheduleChanges))
+
+    /** Was der Posten in einem Jahr ausmacht, ohne Vorzeichen und mit den Sonderzahlungen. */
+    val yearlyTotalCents: Long get() = interval.yearlyCents(abs(amountCents)) + abs(yearlyExtras.sumOf { it.amountCents })
+
+    /**
+     * Beträge, um die herum Buchungen zum Posten gehören: der aktuelle, der vor der letzten Änderung und der in einem
+     * Monat mit Sonderzahlung.
+     */
+    private val referenceAmounts: List<Long> get() =
+        (listOfNotNull(amountCents, previousAmountCents) + yearlyExtras.groupBy { it.date.month }.values.map { extras -> amountCents + extras.sumOf { it.amountCents } })
+            .filter { it != 0L }
 
     val hasOwnRules: Boolean get() = matchRules.isNotBlank()
 

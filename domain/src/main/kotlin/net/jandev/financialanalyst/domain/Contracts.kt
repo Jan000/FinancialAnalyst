@@ -1,6 +1,7 @@
 package net.jandev.financialanalyst.domain
 
 import java.time.LocalDate
+import java.time.YearMonth
 import java.time.temporal.ChronoUnit
 
 /** Abweichung eines einzelnen Termins vom regulären Zahlungsplan eines Vertrags. */
@@ -19,22 +20,59 @@ enum class ChangeKind(val label: String) {
      * Termin abgebucht oder mit einer Gutschrift verrechnet.
      */
     SETTLED("Ohne eigene Buchung bezahlt (bar, mit anderer Abbuchung, verrechnet)"),
+
+    /**
+     * Jährliche Sonderzahlung: ab dem Monat von [ScheduleChange.date] jedes Jahr in diesem Kalendermonat zusätzlich
+     * zum regulären Betrag, etwa Urlaubs- oder Weihnachtsgeld. Kommt mit der ersten Zahlung des Monats.
+     */
+    YEARLY("Jedes Jahr in diesem Monat zusätzlich"),
 }
 
-/** @param amountCents mit Vorzeichen wie der Vertrag; nur für [ChangeKind.ONCE] und [ChangeKind.FROM_HERE] von Bedeutung. */
-data class ScheduleChange(val date: LocalDate, val kind: ChangeKind, val amountCents: Long = 0) {
+/**
+ * @param amountCents mit Vorzeichen wie der Vertrag; für [ChangeKind.ONCE] und [ChangeKind.FROM_HERE] der Betrag des
+ * Termins, für [ChangeKind.YEARLY] der Zuschlag. Für die anderen ohne Bedeutung.
+ * @param note Bezeichnung, etwa „Urlaubsgeld“.
+ */
+data class ScheduleChange(val date: LocalDate, val kind: ChangeKind, val amountCents: Long = 0, val note: String = "") {
     companion object {
         /** Kompakte Ablage in einer Textspalte: `2026-05-10:ONCE:-17734;…`. Unlesbare Teile werden übergangen. */
         fun encode(changes: List<ScheduleChange>): String =
-            changes.sortedBy { it.date }.joinToString(";") { "${it.date}:${it.kind.name}:${it.amountCents}" }
+            changes.sortedBy { it.date }.joinToString(";") { change ->
+                val note = change.note.replace(Regex("[:;]"), " ").trim()
+                "${change.date}:${change.kind.name}:${change.amountCents}" + if (note.isEmpty()) "" else ":$note"
+            }
 
         fun decode(text: String): List<ScheduleChange> = text.split(';').mapNotNull { part ->
-            val fields = part.split(':')
-            if (fields.size != 3) return@mapNotNull null
+            val fields = part.split(':', limit = 4)
+            if (fields.size < 3) return@mapNotNull null
             val date = runCatching { LocalDate.parse(fields[0]) }.getOrNull() ?: return@mapNotNull null
             val kind = ChangeKind.entries.firstOrNull { it.name == fields[1] } ?: return@mapNotNull null
-            ScheduleChange(date, kind, fields[2].toLongOrNull() ?: 0)
+            ScheduleChange(date, kind, fields[2].toLongOrNull() ?: 0, fields.getOrNull(3).orEmpty())
         }
+
+        /** Die jährlichen Sonderzahlungen unter [changes]. */
+        fun yearly(changes: List<ScheduleChange>): List<ScheduleChange> = changes.filter { it.kind == ChangeKind.YEARLY }
+
+        /** Sonderzahlungen, die im Monat von [date] fällig sind. */
+        fun extrasIn(changes: List<ScheduleChange>, date: LocalDate): List<ScheduleChange> {
+            val month = YearMonth.from(date)
+            return changes.filter { it.kind == ChangeKind.YEARLY && it.date.month == date.month && YearMonth.from(it.date) <= month }
+        }
+    }
+}
+
+/**
+ * Verteilt die jährlichen Sonderzahlungen auf die Termine: jeweils auf den ersten Termin eines Monats, damit ein
+ * wöchentlicher Posten den Zuschlag nicht mehrfach bekommt.
+ */
+class YearlyExtras(changes: List<ScheduleChange>) {
+    private val extras = ScheduleChange.yearly(changes)
+    private val served = HashSet<YearMonth>()
+
+    /** Zuschlag für den Termin am [date]; jeder Monat bekommt ihn nur einmal. */
+    fun take(date: LocalDate): Long {
+        if (extras.isEmpty() || !served.add(YearMonth.from(date))) return 0
+        return ScheduleChange.extrasIn(extras, date).sumOf { it.amountCents }
     }
 }
 
@@ -71,7 +109,8 @@ object ContractSchedule {
         changes: List<ScheduleChange>,
         until: LocalDate,
     ): List<Installment> {
-        val byDate = changes.associateBy { it.date }
+        val byDate = changes.filter { it.kind != ChangeKind.YEARLY }.associateBy { it.date }
+        val extras = YearlyExtras(changes)
         val raises = changes.filter { it.kind == ChangeKind.FROM_HERE }.sortedBy { it.date }
         val result = ArrayList<Installment>()
         var index = 0
@@ -80,7 +119,7 @@ object ContractSchedule {
             if (date > until) break
             val change = byDate[date]
             if (change?.kind == ChangeKind.SKIP) continue
-            val regular = raises.lastOrNull { it.date <= date }?.amountCents ?: amountCents
+            val regular = (raises.lastOrNull { it.date <= date }?.amountCents ?: amountCents) + extras.take(date)
             result.add(
                 Installment(
                     date = date,

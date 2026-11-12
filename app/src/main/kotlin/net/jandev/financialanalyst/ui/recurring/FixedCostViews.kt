@@ -75,7 +75,7 @@ internal data class FixedItem(
     val area: CostArea,
     val category: CategoryEntity?,
 ) {
-    val yearlyCents: Long get() = item.interval.yearlyCents(abs(item.amountCents))
+    val yearlyCents: Long get() = item.yearlyTotalCents
     val monthlyCents: Long get() = yearlyCents / 12
 }
 

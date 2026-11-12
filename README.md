@@ -114,6 +114,10 @@ Ohne Google-Einrichtung funktioniert die Sicherung als Datei (**Datei speichern 
   Termin beginnen, wenn die Anfangszeit eines Vertrags nicht nachgebildet werden soll. Eine Notiz nimmt Vertragsnummer
   und Konditionen auf. Unter „Zugehörige
   Buchungen" wählt man, an welchen Buchungen der Posten erkannt wird.
+- **Jährliche Sonderzahlungen** (im Dauerposten, mit oder ohne Zahlungsplan): Beträge, die jedes Jahr im selben
+  Monat zum regulären Betrag dazukommen, etwa Urlaubs- und Weihnachtsgeld oder ein Bonus, mit Bezeichnung. Sie stecken
+  in der ersten Zahlung des Monats und zählen in Budget, Vorschau, Monats- und Jahressummen; eine Buchung mit dem
+  höheren Betrag wird weiter dem Posten zugeordnet.
 - **Analyse:** Kategorien und größte Empfänger lassen sich antippen und zeigen die zugehörigen Umsätze.
 - **Fixkosten** in drei Reitern:
   - **Überblick:** Summen pro Monat, Quartal und Jahr und wie viel der festen Einnahmen sie binden; Verteilung nach

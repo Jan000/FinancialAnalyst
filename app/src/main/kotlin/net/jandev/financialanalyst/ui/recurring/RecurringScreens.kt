@@ -72,7 +72,9 @@ import net.jandev.financialanalyst.data.db.SplitEntity
 import net.jandev.financialanalyst.domain.Budget
 import net.jandev.financialanalyst.domain.RecurringPlan
 import androidx.compose.ui.draw.alpha
+import java.time.Month
 import java.time.format.DateTimeFormatter
+import java.time.format.TextStyle
 import java.util.Locale
 import net.jandev.financialanalyst.domain.Money
 import net.jandev.financialanalyst.domain.RecurrenceInterval
@@ -141,7 +143,7 @@ private fun RecurrenceInterval.perLabel() = when (this) {
 }
 
 /** Durchschnitt pro Monat, aus dem Jahresbetrag gerechnet, damit beim Aufsummieren keine Cent verloren gehen. */
-private fun RecurringEntity.yearlyCents() = interval.yearlyCents(abs(amountCents))
+private fun RecurringEntity.yearlyCents() = yearlyTotalCents
 
 @Composable
 fun RecurringScreen(onEdit: (Long) -> Unit) {
@@ -347,7 +349,7 @@ fun RecurringRow(item: RecurringEntity, today: LocalDate, categoryName: String? 
             }
             Column(horizontalAlignment = Alignment.End) {
                 AmountText(item.amountCents)
-                if (item.interval != RecurrenceInterval.MONTHLY) {
+                if (item.interval != RecurrenceInterval.MONTHLY || item.yearlyExtras.isNotEmpty()) {
                     // Auch seltenere Zahlungen bekommen ihren Monatspreis.
                     Text(
                         "Ø ${Money.format(item.yearlyCents() / 12)} / Monat",
@@ -413,6 +415,8 @@ fun RecurringEditScreen(itemId: Long, onDone: () -> Unit, fromTransactionId: Lon
     var firstDue by rememberSaveable { mutableStateOf(LocalDate.now().toEpochDay()) }
     var changesText by rememberSaveable { mutableStateOf("") }
     var editingDue by remember { mutableStateOf<Installment?>(null) }
+    // Sonderzahlung im Dialog; ein Eintrag mit Betrag 0 ist eine neue.
+    var editingExtra by remember { mutableStateOf<ScheduleChange?>(null) }
     var note by rememberSaveable { mutableStateOf("") }
     var parentKey by rememberSaveable { mutableStateOf("") }
     // Eigene Regeln, welche Buchungen dazugehören: Formularwerte, kodiert wie gespeichert.
@@ -705,6 +709,14 @@ fun RecurringEditScreen(itemId: Long, onDone: () -> Unit, fromTransactionId: Lon
             } else {
                 DateField(date = LocalDate.ofEpochDay(nextDue), onDateChange = { nextDue = it.toEpochDay() }, label = "Nächste Fälligkeit")
             }
+            if (loaded?.isPosition != true) {
+                YearlyExtrasCard(
+                    extras = ScheduleChange.yearly(changes),
+                    regularCents = amountCents ?: 0,
+                    interval = interval,
+                    onEdit = { editingExtra = it },
+                )
+            }
             DropdownField(
                 label = "Kategorie",
                 options = categories,
@@ -760,7 +772,12 @@ fun RecurringEditScreen(itemId: Long, onDone: () -> Unit, fromTransactionId: Lon
                         contractEnd = if (hasContractEnd) LocalDate.ofEpochDay(contractEnd) else null,
                         noticeDays = if (hasContractEnd) noticeDays.toIntOrNull() else null,
                         firstDue = if (isContract) LocalDate.ofEpochDay(firstDue) else null,
-                        scheduleChanges = if (isContract) changesText else "",
+                        // Sonderzahlungen gelten auch ohne Vertragsplan; ihr Vorzeichen folgt dem Posten.
+                        scheduleChanges = ScheduleChange.encode(
+                            (if (isContract) changes else ScheduleChange.yearly(changes)).map { change ->
+                                if (change.kind == ChangeKind.YEARLY) change.copy(amountCents = if (isExpense) -abs(change.amountCents) else abs(change.amountCents)) else change
+                            },
+                        ),
                         note = note.trim(),
                         parentKey = if (base.isPosition) parentKey else base.parentKey,
                         accountId = if (base.isPosition && parentKey != base.parentKey) {
@@ -783,12 +800,26 @@ fun RecurringEditScreen(itemId: Long, onDone: () -> Unit, fromTransactionId: Lon
     editingDue?.let { due ->
         InstallmentDialog(
             due = due,
-            change = changes.firstOrNull { it.date == due.date },
+            change = changes.firstOrNull { it.date == due.date && it.kind != ChangeKind.YEARLY },
             isExpense = isExpense,
             onDismiss = { editingDue = null },
             onSave = { change ->
-                changesText = ScheduleChange.encode(changes.filter { it.date != due.date } + listOfNotNull(change))
+                changesText = ScheduleChange.encode(changes.filter { it.date != due.date || it.kind == ChangeKind.YEARLY } + listOfNotNull(change))
                 editingDue = null
+            },
+        )
+    }
+
+    editingExtra?.let { extra ->
+        val isNew = extra.amountCents == 0L
+        YearlyExtraDialog(
+            extra = extra,
+            isNew = isNew,
+            onDismiss = { editingExtra = null },
+            onSave = { changed ->
+                val others = if (isNew) changes else changes.filter { it != extra }
+                changesText = ScheduleChange.encode(others + listOfNotNull(changed?.copy(amountCents = if (isExpense) -changed.amountCents else changed.amountCents)))
+                editingExtra = null
             },
         )
     }
@@ -926,7 +957,8 @@ private fun ContractScheduleCard(schedule: List<Installment>, changes: List<Sche
         val future = schedule.filter { it.date > today }.take(4)
         (past + future).forEachIndexed { index, due ->
             if (index > 0) HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
-            val change = changes.firstOrNull { it.date == due.date }
+            val change = changes.firstOrNull { it.date == due.date && it.kind != ChangeKind.YEARLY }
+            val extras = if (change?.kind == ChangeKind.ONCE) emptyList() else ScheduleChange.extrasIn(changes, due.date)
             Row(
                 modifier = Modifier.fillMaxWidth().clickable { onEdit(due) }.padding(vertical = 6.dp),
                 verticalAlignment = Alignment.CenterVertically,
@@ -947,6 +979,7 @@ private fun ContractScheduleCard(schedule: List<Installment>, changes: List<Sche
                                 ChangeKind.FROM_HERE -> "neuer Beitrag ab hier"
                                 else -> null
                             },
+                            extras.takeIf { it.isNotEmpty() }?.let { list -> "mit " + list.joinToString { it.note.ifBlank { "Sonderzahlung" } } },
                         ).joinToString(" · "),
                         style = MaterialTheme.typography.bodySmall,
                         color = if (due.isOpen && due.date <= today) LocalFinanceColors.current.warning else MaterialTheme.colorScheme.onSurfaceVariant,
@@ -983,7 +1016,7 @@ private fun InstallmentDialog(
         title = { Text("Termin ${due.date.shortLabel()}") },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                (listOf<ChangeKind?>(null) + ChangeKind.entries).forEach { option ->
+                (listOf<ChangeKind?>(null) + ChangeKind.entries.filter { it != ChangeKind.YEARLY }).forEach { option ->
                     Row(
                         modifier = Modifier.fillMaxWidth().clickable { kind = option },
                         verticalAlignment = Alignment.CenterVertically,
@@ -1006,6 +1039,108 @@ private fun InstallmentDialog(
                             ScheduleChange(due.date, it, if (isExpense) -value else value)
                         },
                     )
+                },
+            ) { Text("Übernehmen") }
+        },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Abbrechen") } },
+    )
+}
+
+private fun Month.germanName(): String = getDisplayName(TextStyle.FULL_STANDALONE, Locale.GERMAN)
+
+/** Jährliche Sonderzahlungen eines Postens: Urlaubs-, Weihnachtsgeld, Jahresbonus oder eine jährliche Gebühr. */
+@Composable
+private fun YearlyExtrasCard(
+    extras: List<ScheduleChange>,
+    regularCents: Long,
+    interval: RecurrenceInterval,
+    onEdit: (ScheduleChange) -> Unit,
+) {
+    SectionCard(title = "Jährliche Sonderzahlungen") {
+        Text(
+            "Kommen jedes Jahr im selben Monat zum regulären Betrag dazu, etwa Urlaubs- und Weihnachtsgeld oder ein " +
+                "Bonus. Sie zählen in Budget und Vorschau mit der ersten Zahlung des Monats.",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        extras.sortedBy { it.date.monthValue }.forEach { extra ->
+            Row(
+                modifier = Modifier.fillMaxWidth().clickable { onEdit(extra) }.padding(vertical = 6.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Column(Modifier.weight(1f).padding(end = 12.dp)) {
+                    Text(extra.note.ifBlank { "Sonderzahlung" }, style = MaterialTheme.typography.bodyMedium)
+                    Text(
+                        "Jedes Jahr im ${extra.date.month.germanName()} · ab ${extra.date.year}",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                AmountText(extra.amountCents, style = MaterialTheme.typography.bodyMedium)
+            }
+        }
+        if (extras.isNotEmpty() && regularCents > 0) {
+            val extraYearly = abs(extras.sumOf { it.amountCents })
+            val yearly = interval.yearlyCents(regularCents) + extraYearly
+            Text(
+                "Im Jahr ${Money.format(yearly)}, davon ${Money.format(extraYearly)} Sonderzahlungen; " +
+                    "Ø ${Money.format(yearly / 12)} pro Monat.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+        TextButton(onClick = { onEdit(ScheduleChange(LocalDate.now().withDayOfMonth(1), ChangeKind.YEARLY, 0)) }) {
+            Icon(Icons.Filled.Add, contentDescription = null)
+            Text("Sonderzahlung hinzufügen", modifier = Modifier.padding(start = 8.dp))
+        }
+    }
+}
+
+/** Sonderzahlung anlegen, ändern oder entfernen; der Betrag ohne Vorzeichen. */
+@Composable
+private fun YearlyExtraDialog(
+    extra: ScheduleChange,
+    isNew: Boolean,
+    onDismiss: () -> Unit,
+    onSave: (ScheduleChange?) -> Unit,
+) {
+    var note by rememberSaveable { mutableStateOf(extra.note) }
+    var month by rememberSaveable { mutableStateOf(extra.date.month) }
+    var amount by rememberSaveable { mutableStateOf(if (isNew) "" else abs(extra.amountCents).toFieldText()) }
+    val cents = Money.parse(amount)?.let(::abs)
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(if (isNew) "Neue Sonderzahlung" else "Sonderzahlung") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                OutlinedTextField(
+                    value = note,
+                    onValueChange = { note = it },
+                    label = { Text("Bezeichnung") },
+                    placeholder = { Text("etwa Urlaubsgeld") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                DropdownField(
+                    label = "Jedes Jahr im",
+                    options = Month.entries,
+                    selected = month,
+                    onSelect = { month = it },
+                    optionLabel = { it.germanName() },
+                )
+                MoneyField(value = amount, onValueChange = { amount = it }, label = "Zusätzlich zum regulären Betrag")
+                if (!isNew) {
+                    TextButton(onClick = { onSave(null) }) { Text("Sonderzahlung entfernen") }
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(
+                enabled = cents != null && cents > 0,
+                onClick = {
+                    // Gilt ab diesem Monat im Jahr der Anlage, damit auch die Termine des laufenden Jahres stimmen.
+                    val start = (if (isNew) LocalDate.now() else extra.date).withDayOfMonth(1).withMonth(month.value)
+                    onSave(ScheduleChange(start, ChangeKind.YEARLY, cents ?: 0, note.trim()))
                 },
             ) { Text("Übernehmen") }
         },

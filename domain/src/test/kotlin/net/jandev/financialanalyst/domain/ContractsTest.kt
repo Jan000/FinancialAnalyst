@@ -63,4 +63,48 @@ class ContractsTest {
         val dates = (0..3).map { ContractSchedule.dateOf(LocalDate.of(2026, 1, 31), RecurrenceInterval.MONTHLY, it) }
         assertEquals(listOf(31, 28, 31, 30), dates.map { it.dayOfMonth })
     }
+
+    @Test
+    fun yearlyExtrasComeWithTheFirstPaymentOfTheirMonth() {
+        // Gehalt 2.000 €, ab Juni 2026 jedes Jahr Urlaubsgeld im Juni und Weihnachtsgeld im November.
+        val extras = listOf(
+            ScheduleChange(LocalDate.of(2026, 6, 1), ChangeKind.YEARLY, 80000, "Urlaubsgeld"),
+            ScheduleChange(LocalDate.of(2026, 11, 1), ChangeKind.YEARLY, 75000, "Weihnachtsgeld"),
+        )
+        val dues = ContractSchedule.dues(LocalDate.of(2026, 1, 28), RecurrenceInterval.MONTHLY, 200000, extras, LocalDate.of(2027, 12, 31))
+        val byMonth = dues.associate { it.date.monthValue + it.date.year * 100 to it.amountCents }
+        assertEquals(200000L, byMonth[202605])
+        assertEquals(280000L, byMonth[202606])
+        assertEquals(275000L, byMonth[202611])
+        assertEquals(280000L, byMonth[202706])
+        assertEquals(275000L, byMonth[202711])
+        assertEquals(24 * 200000L + 2 * 80000 + 2 * 75000, dues.sumOf { it.amountCents })
+
+        // Ohne Vertragsplan: gleiche Zuschläge in der Planung, bei wöchentlichem Rhythmus nur einmal im Monat.
+        val flows = Budget.plannedFlows(
+            listOf(RecurringPlan("Gehalt", 200000, RecurrenceInterval.MONTHLY, LocalDate.of(2026, 11, 28), changes = extras)),
+            LocalDate.of(2026, 11, 12),
+            LocalDate.of(2027, 6, 30),
+        )
+        assertEquals(listOf(275000L, 200000L, 200000L, 200000L, 200000L, 200000L, 200000L, 280000L), flows.map { it.amountCents })
+        val weekly = Budget.plannedFlows(
+            listOf(RecurringPlan("Taschengeld", 1000, RecurrenceInterval.WEEKLY, LocalDate.of(2026, 11, 2), changes = extras)),
+            LocalDate.of(2026, 11, 1),
+            LocalDate.of(2026, 11, 30),
+        )
+        assertEquals(listOf(76000L, 1000L, 1000L, 1000L, 1000L), weekly.map { it.amountCents })
+    }
+
+    @Test
+    fun scheduleChangesKeepTheirNote() {
+        val changes = listOf(
+            ScheduleChange(LocalDate.of(2026, 6, 1), ChangeKind.YEARLY, 81004, "Urlaubsgeld: Juni; brutto"),
+            ScheduleChange(LocalDate.of(2026, 3, 15), ChangeKind.ONCE, -10500),
+        )
+        val decoded = ScheduleChange.decode(ScheduleChange.encode(changes))
+        assertEquals(listOf("", "Urlaubsgeld  Juni  brutto"), decoded.map { it.note })
+        assertEquals(listOf(ChangeKind.ONCE, ChangeKind.YEARLY), decoded.map { it.kind })
+        // Ältere Einträge ohne Bezeichnung bleiben lesbar.
+        assertEquals(1, ScheduleChange.decode("2026-05-10:ONCE:-17734").size)
+    }
 }
