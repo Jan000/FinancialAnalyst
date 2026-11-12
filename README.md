@@ -62,7 +62,9 @@ Abruflimits der übrigen Banken anzutasten.
 
 Über die Schnittstelle kommen nur Zahlungskonten (Giro, Kreditkarte, Tagesgeld). Kredite und Depots gibt keine Bank so
 heraus; liefert eine Freigabe gar kein Konto (so bei der DKB mit nur einem Kredit), sagt die App das. Kredite trägt man
-unter **Kredite** ein; ihre errechnete Restschuld steht dann auch in der Kontenliste.
+unter **Kredite** ein; ihre errechnete Restschuld steht dann auch in der Kontenliste. Neben Ratenänderungen und
+Pausen nimmt ein Kredit Sondertilgungen und weitere Auszahlungen (Aufstockungen, etwa bei Privatkrediten in der
+Familie) auf, dazu eine Notiz.
 
 ### Google-Drive-Sicherung einrichten
 

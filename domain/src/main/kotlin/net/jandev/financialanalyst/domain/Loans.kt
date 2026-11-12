@@ -4,6 +4,10 @@ import java.time.LocalDate
 import kotlin.math.pow
 import kotlin.math.roundToLong
 
+/**
+ * Zahlung außer der Reihe. Positiv: Sondertilgung, senkt die Schuld. Negativ: weitere Auszahlung (Aufstockung),
+ * die Schuld steigt ab diesem Tag um den Betrag.
+ */
 data class ExtraPayment(val date: LocalDate, val amountCents: Long)
 
 /** Ab [from] gilt eine andere Monatsrate; 0 bedeutet eine Zahlpause. */
@@ -35,8 +39,11 @@ data class LoanRow(
     val paymentCents: Long,
     val interestCents: Long,
     val principalCents: Long,
+    /** Sondertilgungen in diesem Ratenzeitraum. */
     val extraCents: Long,
     val remainingCents: Long,
+    /** Weitere Auszahlungen (Aufstockung) in diesem Ratenzeitraum, positiv. */
+    val disbursedCents: Long = 0,
 )
 
 data class LoanSchedule(
@@ -69,19 +76,22 @@ object LoanCalculator {
         var totalInterest = 0L
         var totalPaid = 0L
 
-        while (remaining > 0 && rows.size < MAX_MONTHS) {
+        // Weiter, solange Schuld offen ist oder noch eine Auszahlung kommt.
+        while ((remaining > 0 || extras.any { it.amountCents < 0 && it.date > previous }) && rows.size < MAX_MONTHS) {
             // Sondertilgungen senken die Schuld ab ihrem Buchungstag: der Monatszins wird anteilig (30/360) gerechnet.
             val start = if (previous == LocalDate.MIN) date.minusMonths(1) else previous
             var interestExact = 0.0
             var share = 0.0
             var extra = 0L
+            var disbursed = 0L
             for (payment in extras.filter { it.date > previous && it.date <= date }) {
                 val upTo = (days360(start, payment.date) / 30.0).coerceIn(share, 1.0)
                 interestExact += remaining * monthlyRate * (upTo - share)
                 share = upTo
-                val paid = minOf(remaining, payment.amountCents)
+                // Eine Auszahlung (negativ) erhöht die Schuld; eine Sondertilgung höchstens bis auf null.
+                val paid = if (payment.amountCents < 0) payment.amountCents else minOf(remaining, payment.amountCents)
                 remaining -= paid
-                extra += paid
+                if (paid < 0) disbursed -= paid else extra += paid
             }
             interestExact += remaining * monthlyRate * (1.0 - share)
             val interest = interestExact.roundToLong()
@@ -104,7 +114,7 @@ object LoanCalculator {
             remaining -= principal
             totalInterest += interest
             totalPaid += payment + extra
-            rows.add(LoanRow(date, payment, interest, principal, extra, remaining.coerceAtLeast(0)))
+            rows.add(LoanRow(date, payment, interest, principal, extra, remaining.coerceAtLeast(0), disbursed))
             previous = date
             date = terms.firstPayment.plusMonths(rows.size.toLong())
         }

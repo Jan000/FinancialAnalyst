@@ -120,4 +120,25 @@ class LoansTest {
         )
         assertEquals(listOf(1000L, 500L, 500L), balances.map { it.second })
     }
+
+    @Test
+    fun laterDisbursementRaisesTheDebt() {
+        // Privatkredit ohne Zinsen: 1.000 €, 100 € im Monat, im März 250 € nachgeschossen, im April 50 € extra.
+        val terms = LoanTerms(
+            principalCents = 100000,
+            ratePercent = 0.0,
+            monthlyPaymentCents = 10000,
+            firstPayment = LocalDate.of(2026, 1, 1),
+            extraPayments = listOf(ExtraPayment(LocalDate.of(2026, 3, 10), -25000), ExtraPayment(LocalDate.of(2026, 4, 20), 5000)),
+            rateChanges = listOf(RateChange(LocalDate.of(2026, 2, 1), 0), RateChange(LocalDate.of(2026, 3, 1), 10000)),
+        )
+        val schedule = LoanCalculator.schedule(terms)
+        // Rate am 1.: Jan 900, Feb Pause, Mär 800; die Auszahlung vom 10.03. zählt zur Aprilrate (800 + 250 − 100),
+        // die Sondertilgung vom 20.04. zur Mairate (950 − 50 − 100); danach noch acht Raten.
+        assertEquals(listOf(90000L, 90000L, 80000L, 95000L, 80000L), schedule.rows.take(5).map { it.remainingCents })
+        assertEquals(LocalDate.of(2027, 1, 1), schedule.payoffDate)
+        assertEquals(100000L + 25000, schedule.totalPaidCents)
+        assertEquals(25000L, schedule.rows.sumOf { it.disbursedCents })
+        assertEquals(5000L, schedule.rows.sumOf { it.extraCents })
+    }
 }

@@ -3,6 +3,9 @@ package net.jandev.financialanalyst.ui.loans
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.material3.SegmentedButton
+import androidx.compose.material3.SegmentedButtonDefaults
+import androidx.compose.material3.SingleChoiceSegmentedButtonRow
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
@@ -259,6 +262,9 @@ fun LoanDetailScreen(loanId: Long, onDone: () -> Unit) {
     var firstPayment by rememberSaveable { mutableStateOf(today.toEpochDay()) }
     var whatIf by rememberSaveable { mutableStateOf("") }
     var extraAmount by rememberSaveable { mutableStateOf("") }
+    // Art der Zahlung außer der Reihe: Sondertilgung oder weitere Auszahlung (Schuld steigt).
+    var extraIsDisbursement by rememberSaveable { mutableStateOf(false) }
+    var note by rememberSaveable { mutableStateOf("") }
     var extraDate by rememberSaveable { mutableStateOf(today.toEpochDay()) }
     var changeAmount by rememberSaveable { mutableStateOf("") }
     var changeDate by rememberSaveable { mutableStateOf(today.toEpochDay()) }
@@ -276,6 +282,7 @@ fun LoanDetailScreen(loanId: Long, onDone: () -> Unit) {
             payment = loan.monthlyPaymentCents.toFieldText()
             firstPayment = loan.firstPayment.toEpochDay()
             matchKey = loan.matchKey
+            note = loan.note
             ready = true
         }
     }
@@ -345,6 +352,14 @@ fun LoanDetailScreen(loanId: Long, onDone: () -> Unit) {
             PercentField(value = rate, onValueChange = { rate = it }, label = "Sollzins")
             MoneyField(value = payment, onValueChange = { payment = it }, label = "Monatliche Rate")
             DateField(date = LocalDate.ofEpochDay(firstPayment), onDateChange = { firstPayment = it.toEpochDay() }, label = "Erste Rate am")
+            OutlinedTextField(
+                value = note,
+                onValueChange = { note = it },
+                label = { Text("Notiz (optional)") },
+                supportingText = { Text("Etwa wofür das Geld war oder was vereinbart ist") },
+                minLines = 2,
+                modifier = Modifier.fillMaxWidth(),
+            )
 
             SectionCard(title = "Tatsächliche Zahlungen") {
                 Text(
@@ -385,6 +400,7 @@ fun LoanDetailScreen(loanId: Long, onDone: () -> Unit) {
                         monthlyPaymentCents = paymentCents ?: return@Button,
                         firstPayment = LocalDate.ofEpochDay(firstPayment),
                         matchKey = matchKey,
+                        note = note.trim(),
                     )
                     scope.launch {
                         app.repository.saveLoan(loan)
@@ -427,25 +443,38 @@ fun LoanDetailScreen(loanId: Long, onDone: () -> Unit) {
                         },
                     ) { Text("Ratenänderung hinzufügen") }
                 }
-                SectionCard(title = "Sondertilgungen") {
+                SectionCard(title = "Sondertilgungen und weitere Auszahlungen") {
                     Text(
-                        "Einmalige Zahlungen zusätzlich zur Rate – auch solche, die nicht über ein verbundenes Konto liefen (etwa bar).",
+                        "Sondertilgung: einmalige Zahlung zusätzlich zur Rate, auch bar oder über ein anderes Konto. " +
+                            "Weitere Auszahlung: der Kredit wird aufgestockt, die Schuld steigt ab diesem Tag.",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                     if (extras.isEmpty()) {
                         Text("Noch keine eingetragen.", color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
-                    extras.forEach { extra ->
+                    extras.sortedBy { it.date }.forEach { extra ->
                         Row(verticalAlignment = Alignment.CenterVertically) {
-                            Text(extra.date.shortLabel(), modifier = Modifier.weight(1f))
-                            AmountText(extra.amountCents, withSign = false, colored = false)
+                            Column(Modifier.weight(1f)) {
+                                Text(extra.date.shortLabel())
+                                Text(
+                                    if (extra.amountCents < 0) "Weitere Auszahlung" else "Sondertilgung",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                            }
+                            // Aus Sicht der Schuld: Auszahlung erhöht sie (+), Tilgung senkt sie (−).
+                            Text(Money.format(-extra.amountCents, withSign = true))
                             IconButton(onClick = { scope.launch { app.repository.deleteExtraPayment(extra) } }) {
                                 Icon(Icons.Filled.Clear, contentDescription = "Sondertilgung entfernen")
                             }
                         }
                     }
                     HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+                    SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()) {
+                        SegmentedButton(selected = !extraIsDisbursement, onClick = { extraIsDisbursement = false }, shape = SegmentedButtonDefaults.itemShape(0, 2)) { Text("Sondertilgung") }
+                        SegmentedButton(selected = extraIsDisbursement, onClick = { extraIsDisbursement = true }, shape = SegmentedButtonDefaults.itemShape(1, 2)) { Text("Auszahlung") }
+                    }
                     MoneyField(value = extraAmount, onValueChange = { extraAmount = it }, label = "Betrag")
                     DateField(date = LocalDate.ofEpochDay(extraDate), onDateChange = { extraDate = it.toEpochDay() }, label = "Datum")
                     val extraCents = Money.parse(extraAmount)?.takeIf { it > 0 }
@@ -454,11 +483,13 @@ fun LoanDetailScreen(loanId: Long, onDone: () -> Unit) {
                         onClick = {
                             val cents = extraCents ?: return@OutlinedButton
                             scope.launch {
-                                app.repository.addExtraPayment(LoanExtraPaymentEntity(loanId = loanId, date = LocalDate.ofEpochDay(extraDate), amountCents = cents))
+                                app.repository.addExtraPayment(
+                                    LoanExtraPaymentEntity(loanId = loanId, date = LocalDate.ofEpochDay(extraDate), amountCents = if (extraIsDisbursement) -cents else cents),
+                                )
                                 extraAmount = ""
                             }
                         },
-                    ) { Text("Sondertilgung hinzufügen") }
+                    ) { Text(if (extraIsDisbursement) "Auszahlung hinzufügen" else "Sondertilgung hinzufügen") }
                 }
             }
 
@@ -538,6 +569,14 @@ private fun YearlyPlan(schedule: LoanSchedule) {
             Text("Zinsen", Modifier.weight(1f), style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
             Text("Tilgung", Modifier.weight(1f), style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
             Text("Restschuld", Modifier.weight(1.2f), style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+        val disbursed = years.mapValues { (_, rows) -> rows.sumOf { it.disbursedCents } }.filterValues { it > 0 }
+        if (disbursed.isNotEmpty()) {
+            Text(
+                "Weitere Auszahlungen: " + disbursed.entries.joinToString { (year, cents) -> "$year ${Money.format(cents)}" },
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
         }
         years.forEach { (year, rows) ->
             Row {
