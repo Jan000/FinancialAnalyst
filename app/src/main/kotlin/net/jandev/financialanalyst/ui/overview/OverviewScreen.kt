@@ -34,6 +34,7 @@ import net.jandev.financialanalyst.domain.CategoryKind
 import net.jandev.financialanalyst.domain.Money
 import net.jandev.financialanalyst.domain.NetWorth
 import net.jandev.financialanalyst.ui.common.TrendLine
+import net.jandev.financialanalyst.ui.capital.rememberCapital
 import net.jandev.financialanalyst.ui.common.shortLabel
 import net.jandev.financialanalyst.ui.planning.BudgetRow
 import net.jandev.financialanalyst.ui.planning.rememberBudgetStatus
@@ -58,6 +59,7 @@ fun OverviewScreen(
     onOpenRecurring: () -> Unit,
     onOpenSettings: () -> Unit,
     onOpenBudgets: () -> Unit,
+    onOpenCapital: () -> Unit,
 ) {
     val app = LocalApp.current
     val accounts by app.repository.accounts.collectAsStateWithLifecycle(initialValue = null)
@@ -132,6 +134,20 @@ fun OverviewScreen(
                         startLabel = history.first().first.shortLabel(),
                         endLabel = "heute",
                     )
+                }
+                // Ausblick: wohin es in einem Jahr geht.
+                rememberCapital(months = 12)?.projection?.let { outlook ->
+                    HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+                    LabeledRow("In 12 Monaten voraussichtlich", onClick = onOpenCapital) {
+                        AmountText(outlook.endCents, withSign = false, colored = outlook.endCents < 0, negativeIsAlarming = true)
+                    }
+                    Text(
+                        "Trend ${Money.format(outlook.trendPerMonthCents, withSign = true)} pro Monat" +
+                            (outlook.backToPlus?.let { " · wieder im Plus ab ${it.shortLabel()}" } ?: ""),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    TextButton(onClick = onOpenCapital, modifier = Modifier.align(Alignment.End)) { Text("Kapitalprognose") }
                 }
             }
             val forecasts = remember(today, list, transactions, recurring, categories) {

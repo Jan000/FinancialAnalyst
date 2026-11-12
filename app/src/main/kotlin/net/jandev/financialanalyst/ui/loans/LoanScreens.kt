@@ -97,6 +97,19 @@ private fun LoanEntity.terms(
     actualUntil = today,
 )
 
+/** Wann die Kredite laut Tilgungsplan abbezahlt sind, mit der heutigen Rate; für die Kapitalprognose. */
+internal fun loanEnds(
+    loans: List<LoanEntity>,
+    extras: List<LoanExtraPaymentEntity>,
+    changes: List<LoanRateChangeEntity>,
+    transactions: List<TransactionEntity>,
+    today: LocalDate,
+): List<net.jandev.financialanalyst.data.LoanEnd> = loans.mapNotNull { loan ->
+    val terms = loan.terms(extras, changes, transactions, today)
+    val payoff = LoanCalculator.schedule(terms).payoffDate ?: return@mapNotNull null
+    net.jandev.financialanalyst.data.LoanEnd(loan.name, terms.plannedPayment(today), payoff)
+}
+
 /** Restschuld je Kredit zum Stichtag, für Übersichten außerhalb des Kreditbereichs. */
 internal fun remainingDebts(
     loans: List<LoanEntity>,

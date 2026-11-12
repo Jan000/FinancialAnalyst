@@ -35,6 +35,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import net.jandev.financialanalyst.ui.banking.BankScreen
 import net.jandev.financialanalyst.ui.common.LocalApp
 import net.jandev.financialanalyst.ui.importing.ImportScreen
+import net.jandev.financialanalyst.ui.capital.CapitalScreen
 import net.jandev.financialanalyst.ui.loans.LoanDetailScreen
 import net.jandev.financialanalyst.ui.loans.LoansScreen
 import net.jandev.financialanalyst.ui.loans.OverdraftScreen
@@ -80,6 +81,7 @@ object Routes {
     const val NOTIFICATIONS = "notifications"
     const val BANKS = "banks"
     const val OVERDRAFT = "overdraft"
+    const val CAPITAL = "capital"
     fun loan(id: Long) = "loan/$id"
     fun recurringEdit(id: Long) = "recurring/$id"
     fun accountEdit(id: Long) = "account/$id"
@@ -144,8 +146,10 @@ fun AppRoot() {
                     onOpenRecurring = { nav.openTopLevel(TopLevel.Recurring) },
                     onOpenSettings = { nav.navigate(Routes.SETTINGS) },
                     onOpenBudgets = { nav.navigate(Routes.BUDGETS) },
+                    onOpenCapital = { nav.navigate(Routes.CAPITAL) },
                 )
             }
+            composable(Routes.CAPITAL) { CapitalScreen(onBack = { nav.popBackStack() }) }
             composable(TopLevel.Transactions.route) {
                 TransactionsScreen(
                     onEdit = { nav.navigate(Routes.transactionEdit(it)) },
@@ -255,6 +259,7 @@ fun AppRoot() {
             composable(TopLevel.More.route) {
                 MoreScreen(
                     entries = listOf(
+                        MoreEntry("Kapitalprognose", "Wie sich dein Kapital mit Gehalt, Fixkosten und Alltagsausgaben entwickelt") { nav.navigate(Routes.CAPITAL) },
                         MoreEntry("Konten", "Konten anlegen, Kontostand und Dispo pflegen") { nav.navigate(Routes.ACCOUNTS) },
                         MoreEntry("Bankverbindungen", "Umsätze automatisch direkt von der Bank abrufen") { nav.navigate(Routes.BANKS) },
                         MoreEntry("Zahlungen sofort erfassen", "Benachrichtigungen der Banking-Apps als vorläufige Umsätze mitlesen") { nav.navigate(Routes.NOTIFICATIONS) },

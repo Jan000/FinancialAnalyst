@@ -26,6 +26,8 @@ object ForecastCalculator {
     ): List<AccountForecast> {
         val monthEnd = today.withDayOfMonth(today.lengthOfMonth())
         val byAccount = transactions.groupBy { it.accountId }
+        // Von Hand angelegte Posten haben oft kein Konto: dann gilt das ihrer Buchungen.
+        val accountOf = RecurringAccounts.resolve(recurring, transactions)
         return accounts.map { item ->
             val own = byAccount[item.account.id].orEmpty()
             if (item.account.type == AccountType.PAYPAL) {
@@ -36,7 +38,7 @@ object ForecastCalculator {
                     MonthEnd.forecast(today, item.account.openingBalanceCents, own.map { it.bookingDate to it.amountCents }, emptyList(), 0, 0.0),
                 )
             }
-            val storedItems = recurring.filter { it.active && !it.dismissed && it.accountId == item.account.id }
+            val storedItems = recurring.filter { it.active && !it.dismissed && accountOf[it.id] == item.account.id }
             val storedIndex = RecurringIndex(storedItems)
             val stored = storedItems.map { it.matchKey to it.plan() }
             // Regelmäßige Umbuchungen (etwa der monatliche Übertrag aufs Mietkonto) sind keine Dauerposten der

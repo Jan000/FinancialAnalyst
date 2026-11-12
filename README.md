@@ -119,6 +119,15 @@ Ohne Google-Einrichtung funktioniert die Sicherung als Datei (**Datei speichern 
   in der ersten Zahlung des Monats und zählen in Budget, Vorschau, Monats- und Jahressummen; eine Buchung mit dem
   höheren Betrag wird weiter dem Posten zugeordnet.
 - **Analyse:** Kategorien und größte Empfänger lassen sich antippen und zeigen die zugehörigen Umsätze.
+- **Kapitalprognose** (Mehr, oder aus „Gesamtvermögen“ in der Übersicht): rechnet die Summe aller Konten Tag für Tag
+  für 6 Monate bis 5 Jahre voraus. Grundlage sind die Termine der Dauerposten (Gehalt samt Sonderzahlungen, Fixkosten,
+  offene Vertragsbeiträge), der Tagesdurchschnitt der übrigen Ausgaben (wählbar über 30, 90, 180 Tage oder ein Jahr)
+  und auf Wunsch der übrigen Einnahmen, dazu Dispozinsen auf einen negativen Stand. Kreditraten enden mit dem
+  Tilgungsplan. Gezeigt werden Stand am Ende, Trend pro Monat (Ausgleichsgerade), wann es dauerhaft ins Plus oder
+  ins Minus geht und wann der Dispo-Rahmen nicht mehr reicht. Das Diagramm zeigt bisherigen Verlauf, Prognose und Trend.
+  Ein Regler zeigt, was weniger Alltagsausgaben pro Monat bewirken. Darunter folgt Monat für Monat oder Jahr für Jahr,
+  aufklappbar nach Einnahmen, Fixkosten, Übrigem und Zinsen.
+- **Monatsende je Konto:** Dauerposten ohne hinterlegtes Konto zählen für das Konto ihrer letzten Buchung.
 - **Fixkosten** in drei Reitern:
   - **Überblick:** Summen pro Monat, Quartal und Jahr und wie viel der festen Einnahmen sie binden; Verteilung nach
     Bereichen (Wohnen & Energie, Mobilität, Versicherungen, Kredite & Gebühren, Abos & Digitales, Leben & Alltag, Sparen,
