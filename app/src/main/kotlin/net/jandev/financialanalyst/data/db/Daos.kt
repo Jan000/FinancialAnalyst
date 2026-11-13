@@ -248,6 +248,9 @@ interface LoanDao {
     @Insert
     suspend fun insertExtra(payment: LoanExtraPaymentEntity): Long
 
+    @Update
+    suspend fun updateExtra(payment: LoanExtraPaymentEntity)
+
     @Delete
     suspend fun deleteExtra(payment: LoanExtraPaymentEntity)
 

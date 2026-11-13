@@ -334,6 +334,8 @@ class FinanceRepository(
 
     suspend fun addExtraPayment(payment: LoanExtraPaymentEntity) = db.loans().insertExtra(payment)
 
+    suspend fun updateExtraPayment(payment: LoanExtraPaymentEntity) = db.loans().updateExtra(payment)
+
     suspend fun deleteExtraPayment(payment: LoanExtraPaymentEntity) = db.loans().deleteExtra(payment)
 
     val loanRateChanges: Flow<List<LoanRateChangeEntity>> = db.loans().observeRateChanges()

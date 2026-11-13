@@ -39,7 +39,7 @@ class Converters {
         BankSessionEntity::class,
         SplitEntity::class,
     ],
-    version = 8,
+    version = 9,
     exportSchema = false,
 )
 @TypeConverters(Converters::class)
@@ -79,6 +79,13 @@ abstract class AppDatabase : RoomDatabase() {
                     "CREATE TABLE IF NOT EXISTS `tx_groups` (`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, " +
                         "`name` TEXT NOT NULL, `colorIndex` INTEGER NOT NULL, `note` TEXT NOT NULL)",
                 )
+            }
+        }
+
+        /** Notiz je Sondertilgung und weiterer Auszahlung eines Kredits. */
+        private val MIGRATION_8_9 = object : Migration(8, 9) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE `loan_extra_payments` ADD COLUMN `note` TEXT NOT NULL DEFAULT ''")
             }
         }
 
@@ -157,7 +164,7 @@ abstract class AppDatabase : RoomDatabase() {
 
         fun open(context: Context): AppDatabase =
             Room.databaseBuilder(context, AppDatabase::class.java, FILE_NAME)
-                .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8)
+                .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9)
                 .build()
     }
 }

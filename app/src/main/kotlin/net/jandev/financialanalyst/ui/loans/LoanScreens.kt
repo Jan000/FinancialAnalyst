@@ -22,7 +22,9 @@ import androidx.compose.material.icons.filled.Clear
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material3.Button
 import androidx.compose.material3.ExtendedFloatingActionButton
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -113,6 +115,10 @@ internal fun loanEnds(
     net.jandev.financialanalyst.data.LoanEnd(loan.name, terms.plannedPayment(today), payoff)
 }
 
+/** Darlehensbetrag samt aller weiteren Auszahlungen bis [today]. */
+private fun LoanEntity.totalBorrowedCents(extras: List<LoanExtraPaymentEntity>, today: LocalDate): Long =
+    principalCents - extras.filter { it.loanId == id && it.amountCents < 0 && it.date <= today }.sumOf { it.amountCents }
+
 /** Restschuld je Kredit zum Stichtag, für Übersichten außerhalb des Kreditbereichs. */
 internal fun remainingDebts(
     loans: List<LoanEntity>,
@@ -180,6 +186,10 @@ fun LoansScreen(onBack: () -> Unit, onOpen: (Long) -> Unit) {
                 Triple(loan, schedule, LoanCalculator.status(terms, schedule, today))
             }
         }
+        // Bisher ausgezahlt: Darlehensbetrag und alle weiteren Auszahlungen bis heute.
+        val borrowed = remember(list, extras, today) {
+            list.associate { loan -> loan.id to loan.totalBorrowedCents(extras, today) }
+        }
         val plannedNow = remember(list, changes, today) {
             list.associate { loan ->
                 loan.id to (changes.filter { it.loanId == loan.id && it.fromDate <= today }.maxByOrNull { it.fromDate }?.monthlyPaymentCents
@@ -225,9 +235,16 @@ fun LoansScreen(onBack: () -> Unit, onOpen: (Long) -> Unit) {
                         }
                         AmountText(status.remainingCents, style = MaterialTheme.typography.titleMedium, withSign = false, colored = false)
                     }
+                    val total = borrowed[loan.id] ?: loan.principalCents
+                    val repaid = (total - status.remainingCents).coerceAtLeast(0)
                     ShareBar(
-                        fraction = 1f - status.remainingCents.toFloat() / loan.principalCents.coerceAtLeast(1),
+                        fraction = repaid.toFloat() / total.coerceAtLeast(1),
                         color = MaterialTheme.colorScheme.primary,
+                    )
+                    Text(
+                        "${Money.format(repaid)} von ${Money.format(total)} getilgt (${(repaid * 100 / total.coerceAtLeast(1))} %)" +
+                            if (total != loan.principalCents) " · inkl. ${Money.format(total - loan.principalCents)} weitere Auszahlungen" else "",
+                        style = MaterialTheme.typography.bodySmall,
                     )
                     Text(
                         when {
@@ -264,6 +281,8 @@ fun LoanDetailScreen(loanId: Long, onDone: () -> Unit) {
     var extraAmount by rememberSaveable { mutableStateOf("") }
     // Art der Zahlung außer der Reihe: Sondertilgung oder weitere Auszahlung (Schuld steigt).
     var extraIsDisbursement by rememberSaveable { mutableStateOf(false) }
+    var extraNote by rememberSaveable { mutableStateOf("") }
+    var editingExtra by remember { mutableStateOf<LoanExtraPaymentEntity?>(null) }
     var note by rememberSaveable { mutableStateOf("") }
     var extraDate by rememberSaveable { mutableStateOf(today.toEpochDay()) }
     var changeAmount by rememberSaveable { mutableStateOf("") }
@@ -453,12 +472,13 @@ fun LoanDetailScreen(loanId: Long, onDone: () -> Unit) {
                     if (extras.isEmpty()) {
                         Text("Noch keine eingetragen.", color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
-                    extras.sortedBy { it.date }.forEach { extra ->
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Column(Modifier.weight(1f)) {
-                                Text(extra.date.shortLabel())
+                    extras.sortedBy { it.date }.forEachIndexed { index, extra ->
+                        if (index > 0) HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+                        Row(Modifier.clickable { editingExtra = extra }, verticalAlignment = Alignment.CenterVertically) {
+                            Column(Modifier.weight(1f).padding(vertical = 4.dp)) {
+                                Text(extra.note.ifBlank { if (extra.amountCents < 0) "Weitere Auszahlung" else "Sondertilgung" })
                                 Text(
-                                    if (extra.amountCents < 0) "Weitere Auszahlung" else "Sondertilgung",
+                                    "${extra.date.shortLabel()} · " + if (extra.amountCents < 0) "Weitere Auszahlung" else "Sondertilgung",
                                     style = MaterialTheme.typography.bodySmall,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                                 )
@@ -475,8 +495,23 @@ fun LoanDetailScreen(loanId: Long, onDone: () -> Unit) {
                         SegmentedButton(selected = !extraIsDisbursement, onClick = { extraIsDisbursement = false }, shape = SegmentedButtonDefaults.itemShape(0, 2)) { Text("Sondertilgung") }
                         SegmentedButton(selected = extraIsDisbursement, onClick = { extraIsDisbursement = true }, shape = SegmentedButtonDefaults.itemShape(1, 2)) { Text("Auszahlung") }
                     }
+                    if (extras.isNotEmpty()) {
+                        Text(
+                            "Tippe einen Eintrag an, um ihn zu ändern oder eine Notiz zu ergänzen.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
                     MoneyField(value = extraAmount, onValueChange = { extraAmount = it }, label = "Betrag")
                     DateField(date = LocalDate.ofEpochDay(extraDate), onDateChange = { extraDate = it.toEpochDay() }, label = "Datum")
+                    OutlinedTextField(
+                        value = extraNote,
+                        onValueChange = { extraNote = it },
+                        label = { Text("Notiz (optional)") },
+                        placeholder = { Text("etwa wofür") },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth(),
+                    )
                     val extraCents = Money.parse(extraAmount)?.takeIf { it > 0 }
                     OutlinedButton(
                         enabled = extraCents != null,
@@ -484,9 +519,15 @@ fun LoanDetailScreen(loanId: Long, onDone: () -> Unit) {
                             val cents = extraCents ?: return@OutlinedButton
                             scope.launch {
                                 app.repository.addExtraPayment(
-                                    LoanExtraPaymentEntity(loanId = loanId, date = LocalDate.ofEpochDay(extraDate), amountCents = if (extraIsDisbursement) -cents else cents),
+                                    LoanExtraPaymentEntity(
+                                        loanId = loanId,
+                                        date = LocalDate.ofEpochDay(extraDate),
+                                        amountCents = if (extraIsDisbursement) -cents else cents,
+                                        note = extraNote.trim(),
+                                    ),
                                 )
                                 extraAmount = ""
+                                extraNote = ""
                             }
                         },
                     ) { Text(if (extraIsDisbursement) "Auszahlung hinzufügen" else "Sondertilgung hinzufügen") }
@@ -516,6 +557,21 @@ fun LoanDetailScreen(loanId: Long, onDone: () -> Unit) {
         }
     }
 
+    editingExtra?.let { extra ->
+        ExtraPaymentDialog(
+            extra = extra,
+            onDismiss = { editingExtra = null },
+            onSave = { changed ->
+                editingExtra = null
+                scope.launch { app.repository.updateExtraPayment(changed) }
+            },
+            onDelete = {
+                editingExtra = null
+                scope.launch { app.repository.deleteExtraPayment(extra) }
+            },
+        )
+    }
+
     if (confirmDelete) {
         ConfirmDialog(
             title = "Kredit löschen?",
@@ -534,6 +590,53 @@ fun LoanDetailScreen(loanId: Long, onDone: () -> Unit) {
     }
 }
 
+/** Sondertilgung oder weitere Auszahlung ändern: Art, Betrag, Datum, Notiz; oder entfernen. */
+@Composable
+private fun ExtraPaymentDialog(
+    extra: LoanExtraPaymentEntity,
+    onDismiss: () -> Unit,
+    onSave: (LoanExtraPaymentEntity) -> Unit,
+    onDelete: () -> Unit,
+) {
+    var disbursement by rememberSaveable { mutableStateOf(extra.amountCents < 0) }
+    var amount by rememberSaveable { mutableStateOf(kotlin.math.abs(extra.amountCents).toFieldText()) }
+    var date by rememberSaveable { mutableStateOf(extra.date.toEpochDay()) }
+    var note by rememberSaveable { mutableStateOf(extra.note) }
+    val cents = Money.parse(amount)?.takeIf { it > 0 }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(if (disbursement) "Weitere Auszahlung" else "Sondertilgung") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()) {
+                    SegmentedButton(selected = !disbursement, onClick = { disbursement = false }, shape = SegmentedButtonDefaults.itemShape(0, 2)) { Text("Sondertilgung") }
+                    SegmentedButton(selected = disbursement, onClick = { disbursement = true }, shape = SegmentedButtonDefaults.itemShape(1, 2)) { Text("Auszahlung") }
+                }
+                MoneyField(value = amount, onValueChange = { amount = it }, label = "Betrag")
+                DateField(date = LocalDate.ofEpochDay(date), onDateChange = { date = it.toEpochDay() }, label = "Datum")
+                OutlinedTextField(
+                    value = note,
+                    onValueChange = { note = it },
+                    label = { Text("Notiz") },
+                    placeholder = { Text("etwa wofür") },
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                TextButton(onClick = onDelete) { Text("Eintrag entfernen") }
+            }
+        },
+        confirmButton = {
+            TextButton(
+                enabled = cents != null,
+                onClick = {
+                    val value = cents ?: return@TextButton
+                    onSave(extra.copy(amountCents = if (disbursement) -value else value, date = LocalDate.ofEpochDay(date), note = note.trim()))
+                },
+            ) { Text("Übernehmen") }
+        },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Abbrechen") } },
+    )
+}
+
 @Composable
 private fun LoanSummary(terms: LoanTerms, schedule: LoanSchedule, today: LocalDate) {
     val status = LoanCalculator.status(terms, schedule, today)
@@ -546,6 +649,19 @@ private fun LoanSummary(terms: LoanTerms, schedule: LoanSchedule, today: LocalDa
             )
             return@SectionCard
         }
+        val disbursed = -terms.extraPayments.filter { it.amountCents < 0 && it.date <= today }.sumOf { it.amountCents }
+        val total = terms.principalCents + disbursed
+        if (disbursed > 0) {
+            LabeledRow("Kreditbetrag gesamt") { AmountText(total, withSign = false, colored = false) }
+            Text(
+                "${Money.format(terms.principalCents)} Darlehen und ${Money.format(disbursed)} weitere Auszahlungen",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+        val repaid = (total - status.remainingCents).coerceAtLeast(0)
+        LabeledRow("Getilgt") { Text("${Money.format(repaid)} (${repaid * 100 / total.coerceAtLeast(1)} %)") }
+        ShareBar(fraction = repaid.toFloat() / total.coerceAtLeast(1), color = MaterialTheme.colorScheme.primary)
         LabeledRow("Restschuld") { AmountText(status.remainingCents, withSign = false, colored = false) }
         LabeledRow("Bisher gezahlte Zinsen") { AmountText(status.paidInterestCents, withSign = false, colored = false) }
         LabeledRow("Noch anfallende Zinsen") { AmountText(status.remainingInterestCents, withSign = false, colored = false) }

@@ -358,7 +358,10 @@ data class LoanExtraPaymentEntity(
     @PrimaryKey(autoGenerate = true) val id: Long = 0,
     val loanId: Long,
     val date: LocalDate,
+    /** Positiv: Sondertilgung; negativ: weitere Auszahlung (Aufstockung). */
     val amountCents: Long,
+    /** Wofür, etwa „MPU-Vorbereitung“. */
+    val note: String = "",
 )
 
 @Entity(tableName = "budgets")
